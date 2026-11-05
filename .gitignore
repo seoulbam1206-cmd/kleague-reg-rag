@@ -1,0 +1,25 @@
+# 비공개 문서: 절대 커밋 금지
+docs_private/
+
+# 비밀키
+.env
+.env.*
+
+# 가상환경
+.venv/
+venv/
+env/
+
+# Python 부산물
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Claude Code 개인 설정
+.claude/settings.local.json
+
+# 다운로드 중간 파일
+*.part
+
+# 규정 PDF: 저장소에 올리지 않음 (scripts/download_regulations.py로 받음)
+docs_public/*.pdf
