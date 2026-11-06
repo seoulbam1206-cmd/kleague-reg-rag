@@ -15,8 +15,7 @@ PDF → 텍스트 추출 → 조문 단위 청킹 → 검색 → LLM 답변 → 
   - `tests/test_harness.py`: `docs_private/`와 `.env`가 git에서 제외되고, 읽기 금지 규칙이 설정되어 있음
   - `tests/test_download.py`: 개정 메모·해시 기준의 건너뛰기 판단이 동작함
 
-## 1단계. PDF 텍스트 추출 ⬜
-- 시작 조건: 15번 30쪽 수동 요약의 사용자 검토 완료
+## 1단계. PDF 텍스트 추출 🔄
 - 내용: `src/extract.py`로 pdfplumber를 써서 페이지별 텍스트를 뽑고 메타데이터를 붙인다.
 - 처리할 것
   - 머리말·쪽번호·목차·표지 제거
