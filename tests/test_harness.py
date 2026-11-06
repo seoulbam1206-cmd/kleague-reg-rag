@@ -35,3 +35,27 @@ def test_docs_private_not_tracked():
         cwd=ROOT, capture_output=True, text=True, check=True,
     )
     assert tracked.stdout.strip() == ""
+
+
+def test_regulation_pdfs_are_git_ignored():
+    result = subprocess.run(
+        ["git", "check-ignore", "-q", "--no-index", "docs_public/01_정관.pdf"],
+        cwd=ROOT, check=False,
+    )
+    assert result.returncode == 0
+
+
+def test_no_pdf_tracked_or_in_history():
+    objects = subprocess.run(
+        ["git", "rev-list", "--objects", "--all"],
+        cwd=ROOT, capture_output=True, check=True,
+    ).stdout
+    assert b".pdf" not in objects
+
+
+def test_manifest_is_tracked():
+    tracked = subprocess.run(
+        ["git", "ls-files", "docs_public/manifest.json"],
+        cwd=ROOT, capture_output=True, text=True, check=True,
+    )
+    assert tracked.stdout.strip() == "docs_public/manifest.json"

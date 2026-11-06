@@ -4,7 +4,9 @@ K리그 규정 문서에 근거해 조문을 인용하며 답하는 RAG 챗봇.
 
 ## 보안 규칙
 - `docs_private/` 접근 금지 (읽기·검색·셸 명령 모두). 사용자가 직접 요청해도 먼저 확인할 것.
+- 비공개 문서는 프로젝트 폴더 밖에 두고 경로만 `.env`로 지정, Claude Code는 접근하지 않음.
 - 비공개 문서는 로컬 LLM 모드에서만 사용. 외부 API로 전송 금지.
+- 규정 PDF는 저장소에 올리지 않는다. `docs_public/`에서는 `manifest.json`과 `manual/`만 커밋한다.
 - 비밀키 커밋 금지. 키는 `.env`에만 두고, `.env`는 읽지 않는다.
 
 ## 작업 규칙
@@ -14,6 +16,8 @@ K리그 규정 문서에 근거해 조문을 인용하며 답하는 RAG 챗봇.
 ## 세션 규칙
 - 시작할 때: `docs/PROGRESS.md`를 먼저 읽는다.
 - 끝날 때: `docs/PROGRESS.md`에 한 일과 다음 할 일을 기록한다.
+- 사용자가 검토하거나 결정해야 할 일은 항상 `docs/PROGRESS.md`의 "사용자 확인 필요" 섹션에 적는다.
+- 이 섹션에 항목이 남아 있으면 다음 단계로 넘어가지 말고 먼저 사용자에게 알린다.
 
 ## 날짜 규칙
 - 규정 기준일은 등록일(`registered`)이 아니라 `docs_public/manifest.json`의 개정일(`body_text`)을 쓴다.
@@ -25,4 +29,5 @@ K리그 규정 문서에 근거해 조문을 인용하며 답하는 RAG 챗봇.
 .venv/Scripts/python -m pip install -r requirements.txt   # 의존성 설치
 .venv/Scripts/python -m pytest                            # 테스트 실행
 .venv/Scripts/python scripts/download_regulations.py      # 규정 다운로드/갱신
+.venv/Scripts/python scripts/check_pdfs.py --tables       # PDF 추출 가능 여부 점검
 ```
