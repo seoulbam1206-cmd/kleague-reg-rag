@@ -119,30 +119,36 @@ def page(docs, no, page_no):
     return docs[no]["pages"][page_no - 1]
 
 
+@pytest.mark.slow
 def test_all_documents_keep_page_counts(docs):
     assert {no: len(d["pages"]) for no, d in docs.items()} == PAGE_COUNTS
 
 
+@pytest.mark.slow
 def test_effective_dates(docs):
     actual = {no: (d["effective_date"], d["effective_kind"]) for no, d in docs.items()}
     assert actual == EFFECTIVE
 
 
+@pytest.mark.slow
 def test_effective_date_is_not_registered_date(docs):
     assert docs[15]["registered"] == "2024.03.27"
     assert docs[15]["effective_date"] == "2026-01-16"
 
 
+@pytest.mark.slow
 def test_no_control_or_broken_characters(docs):
     for d in docs.values():
         text = "\n".join(p["text"] for p in d["pages"])
         assert not re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f�-]", text), d["no"]
 
 
+@pytest.mark.slow
 def test_word_spacing_survives_in_doc_17(docs):
     assert "홈 구단이 지정한 경기장에서 경기를 개최하기 위해서는" in page(docs, 17, 5)["text"]
 
 
+@pytest.mark.slow
 def test_every_body_page_has_text_and_no_page_mark(docs):
     for d in docs.values():
         for p in d["pages"]:
@@ -152,6 +158,7 @@ def test_every_body_page_has_text_and_no_page_mark(docs):
                 assert not re.fullmatch(r"-?\s*\d{1,3}\s*-?", last), (d["no"], p["page"])
 
 
+@pytest.mark.slow
 def test_page_kinds(docs):
     assert page(docs, 1, 1)["kind"] == "cover"
     assert [page(docs, 1, n)["kind"] for n in (2, 3, 4)] == ["toc"] * 3
@@ -164,6 +171,7 @@ def test_page_kinds(docs):
     assert page(docs, 6, 1)["kind"] == "body"
 
 
+@pytest.mark.slow
 def test_removed_pages_have_no_text(docs):
     for d in docs.values():
         for p in d["pages"]:
@@ -171,6 +179,7 @@ def test_removed_pages_have_no_text(docs):
                 assert p["text"] == ""
 
 
+@pytest.mark.slow
 def test_table_with_dashed_rules_is_preserved(docs):
     text = page(docs, 9, 29)["text"]
     assert "| 라운드별 팀 벌점 합산 | 제재금 |  |" in text
@@ -178,16 +187,19 @@ def test_table_with_dashed_rules_is_preserved(docs):
     assert "| 51점~ | 200만원 | 100만원 |" in text
 
 
+@pytest.mark.slow
 def test_award_table_is_preserved(docs):
     assert "| 구분 | 내용 | 선정 방법 | 포상 시기 |" in page(docs, 9, 30)["text"]
 
 
+@pytest.mark.slow
 def test_licensing_table_is_preserved(docs):
     text = page(docs, 15, 10)["text"]
     assert "| 대회 | 클럽 라이선싱 절차 | 라이선스 | 라이센서 |" in text
     assert "| K리그1 | K리그1 클럽 라이선싱 | K리그1 라이선스 | 연맹 |" in text
 
 
+@pytest.mark.slow
 def test_flowchart_page_uses_reviewed_summary(docs):
     p = page(docs, 15, 30)
     assert p["kind"] == "manual"
@@ -199,6 +211,7 @@ def _letters(text: str) -> Counter:
     return Counter(re.sub(r"[\s|\-]", "", clean_text(text)))
 
 
+@pytest.mark.slow
 def test_no_text_lost_or_duplicated(docs):
     """표 처리 전후로 글자가 사라지거나 중복되면 안 된다 (쪽번호 제외)."""
     for d in docs.values():

@@ -40,6 +40,7 @@ def test_is_scanned():
     assert is_scanned({"empty_pages": [], "image_pages": [30]}, 86) is False
 
 
+@pytest.mark.slow
 def test_real_pdf_is_text_based():
     report = inspect_pdf(pdf_path("05"))
     assert report["pages"] == 20
@@ -47,10 +48,12 @@ def test_real_pdf_is_text_based():
     assert report["replacement_chars"] == 0
 
 
+@pytest.mark.slow
 def test_flowchart_page_is_detected_as_image():
     assert inspect_pdf(pdf_path("15"))["image_pages"] == [30]
 
 
+@pytest.mark.slow
 def test_dashed_rule_tables_are_found():
     """09번 29쪽 표는 0.5pt 조각 괘선이라 기본 설정으로는 찾지 못한다."""
     with pdfplumber.open(pdf_path("09")) as pdf:

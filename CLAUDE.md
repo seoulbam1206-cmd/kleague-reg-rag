@@ -28,7 +28,8 @@ K리그 규정 문서에 근거해 조문을 인용하며 답하는 RAG 챗봇.
 ## 자주 쓰는 명령어
 ```
 .venv/Scripts/python -m pip install -r requirements.txt   # 의존성 설치
-.venv/Scripts/python -m pytest                            # 테스트 실행
+.venv/Scripts/python -m pytest -m "not slow"              # 작업 중: 빠른 테스트만
+.venv/Scripts/python -m pytest                            # 커밋 전: 전체 테스트 (약 3분)
 .venv/Scripts/python scripts/download_regulations.py      # 규정 다운로드/갱신
 .venv/Scripts/python scripts/check_pdfs.py --tables       # PDF 추출 가능 여부 점검
 ```
