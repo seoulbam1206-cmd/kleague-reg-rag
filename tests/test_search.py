@@ -9,6 +9,7 @@ from search import (
     Searcher,
     article_keys,
     find_regulation,
+    find_regulations,
     load_chunks,
     rrf,
     tokenize,
@@ -126,6 +127,55 @@ def test_addendum_reference_is_first():
 def test_dotted_clause_reference_is_first():
     results = Searcher(SAMPLE).search("클럽 라이선싱 규정 11.6.10 내용", mode="keyword")
     assert results[0]["article_no"] == "제11조"
+
+
+def test_find_regulations_in_order_of_appearance():
+    titles = ["선수 규정", "경기 규정", "K리그 클럽 라이선싱 규정"]
+    found = find_regulations("경기 규정과 클럽 라이선싱 규정을 비교", titles)
+    assert [title for title, _ in found] == ["경기 규정", "K리그 클럽 라이선싱 규정"]
+
+
+def test_find_regulations_ignores_name_inside_longer_name():
+    titles = ["재정건전화 규정", "클럽 재정건전화 준수 세칙"]
+    found = find_regulations("클럽 재정건전화 준수 세칙 제2조", titles)
+    assert [title for title, _ in found] == ["클럽 재정건전화 준수 세칙"]
+
+
+def test_find_regulations_splits_segments_by_name():
+    found = dict(find_regulations("선수 규정 제2조와 경기 규정 제3조", ["선수 규정", "경기 규정"]))
+    assert "제2조" in found["선수 규정"] and "제3조" not in found["선수 규정"]
+    assert "제3조" in found["경기 규정"]
+
+
+def test_repeated_name_counts_once():
+    found = find_regulations("선수 규정과 선수 규정의 차이", ["선수 규정"])
+    assert len(found) == 1
+
+
+def test_comparison_returns_both_regulations():
+    chunks = [chunk("선수 규정", f"제{i}조", f"계약 내용 {i}") for i in range(1, 7)]
+    chunks.append(chunk("경기 규정", "제1조", "경기장 시설 안내"))
+    results = Searcher(chunks).search("선수 규정과 경기 규정의 계약 내용 비교", k=3, mode="keyword")
+    assert {c["regulation"] for c in results} == {"선수 규정", "경기 규정"}
+
+
+def test_comparison_alternates_regulations():
+    chunks = [chunk("선수 규정", f"제{i}조", "계약") for i in range(1, 4)]
+    chunks += [chunk("경기 규정", f"제{i}조", "계약") for i in range(1, 4)]
+    results = Searcher(chunks).search("선수 규정과 경기 규정의 계약", k=4, mode="keyword")
+    assert [c["regulation"] for c in results] == ["선수 규정", "경기 규정"] * 2
+
+
+def test_comparison_keeps_article_numbers_with_their_regulation():
+    results = Searcher(SAMPLE).search("선수 규정 제2조와 경기 규정 제2조 비교", k=2, mode="keyword")
+    assert [(c["regulation"], c["article_no"]) for c in results] == [
+        ("선수 규정", "제2조"), ("경기 규정", "제2조"),
+    ]
+
+
+def test_single_regulation_query_is_not_split():
+    results = Searcher(SAMPLE).search("선수 규정 계약", k=5, mode="keyword")
+    assert results[0]["regulation"] == "선수 규정"
 
 
 def test_article_number_without_regulation_is_not_forced():

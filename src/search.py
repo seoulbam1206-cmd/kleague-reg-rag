@@ -9,6 +9,7 @@ import json
 import math
 import re
 from collections import Counter
+from itertools import zip_longest
 from pathlib import Path
 from typing import Protocol
 
@@ -106,6 +107,31 @@ def find_regulation(query: str, titles: list[str]) -> str | None:
     return max(matches)[1] if matches else None
 
 
+def find_regulations(query: str, titles: list[str]) -> list[tuple[str, str]]:
+    """질문에 나온 규정을 등장 순서대로 찾아 (규정명, 그 규정을 가리키는 구간)으로 돌려준다.
+
+    긴 이름 안에 든 짧은 이름은 따로 세지 않는다. 구간은 규정명부터 다음 규정명 앞까지다.
+    """
+    squeezed = _squeeze(query)
+    names = sorted(
+        {(candidate, title) for title in titles
+         for candidate in (_squeeze(title), _squeeze(title).removeprefix("K리그"))},
+        key=lambda item: -len(item[0]),
+    )
+    spans: list[tuple[int, int, str]] = []
+    for candidate, title in names:
+        for match in re.finditer(re.escape(candidate), squeezed):
+            overlaps = any(start < match.end() and match.start() < end for start, end, _ in spans)
+            if not overlaps:
+                spans.append((match.start(), match.end(), title))
+    spans.sort()
+    found: dict[str, str] = {}
+    for index, (start, _, title) in enumerate(spans):
+        end = spans[index + 1][0] if index + 1 < len(spans) else len(squeezed)
+        found[title] = found.get(title, "") + squeezed[start:end]
+    return list(found.items())
+
+
 def article_keys(query: str) -> list[str]:
     """질문에서 조번호를 chunk의 article_no 형식으로 뽑는다."""
     keys = []
@@ -141,11 +167,8 @@ class Searcher:
         scores = self.vectors @ self.encoder.encode_query(query)
         return [int(i) for i in np.argsort(-scores, kind="stable")]
 
-    def direct_hits(self, query: str) -> set[int]:
-        """규정명과 조번호가 함께 나오면 그 조문의 청크를 돌려준다."""
-        title = find_regulation(query, self.titles)
-        if title is None:
-            return set()
+    def direct_hits_in(self, title: str, query: str) -> set[int]:
+        """한 규정 안에서 질문이 가리키는 조문의 청크를 찾는다."""
         scope = [(i, c) for i, c in enumerate(self.chunks) if c["regulation"] == title]
         keys = set(article_keys(query))
         hits = {i for i, c in scope if c.get("article_no") in keys}
@@ -154,23 +177,49 @@ class Searcher:
             hits |= {i for i, c in scope if line.search(c["body"])}
         return hits
 
+    def direct_hits(self, query: str) -> set[int]:
+        """규정명과 조번호가 함께 나오면 그 조문의 청크를 돌려준다."""
+        title = find_regulation(query, self.titles)
+        return self.direct_hits_in(title, query) if title else set()
+
+    def base_ranking(self, query: str, mode: str) -> list[int]:
+        rankings = []
+        if mode in ("keyword", "hybrid"):
+            rankings.append(self.keyword_ranking(query))
+        if mode in ("embedding", "hybrid"):
+            rankings.append(self.embedding_ranking(query))
+        return rrf(rankings)
+
+    @staticmethod
+    def pin_first(ranking: list[int], direct: set[int]) -> list[int]:
+        ranked = set(ranking)
+        ordered = [i for i in ranking if i in direct] + sorted(direct - ranked)
+        return ordered + [i for i in ranking if i not in direct]
+
+    def comparison_ranking(self, query: str, mode: str,
+                           regulations: list[tuple[str, str]]) -> list[int]:
+        """규정마다 따로 순위를 매긴 뒤 번갈아 고른다. 한 규정이 상위를 독차지하지 못한다."""
+        base = self.base_ranking(query, mode)
+        per_regulation = []
+        for title, segment in regulations:
+            scoped = [i for i in base if self.chunks[i]["regulation"] == title]
+            per_regulation.append(self.pin_first(scoped, self.direct_hits_in(title, segment)))
+        merged: list[int] = []
+        for group in zip_longest(*per_regulation):
+            merged += [i for i in group if i is not None]
+        return merged
+
     def search(self, query: str, k: int = 5, mode: str = "hybrid") -> list[dict]:
         """mode는 keyword, embedding, hybrid 중 하나다. 임베딩이 없으면 keyword만 쓴다."""
         if mode not in ("keyword", "embedding", "hybrid"):
             raise ValueError(f"알 수 없는 검색 방식: {mode}")
         if self.encoder is None and mode != "keyword":
             raise ValueError("임베딩 모델 없이 쓸 수 있는 방식은 keyword뿐이다")
-        rankings = []
-        if mode in ("keyword", "hybrid"):
-            rankings.append(self.keyword_ranking(query))
-        if mode in ("embedding", "hybrid"):
-            rankings.append(self.embedding_ranking(query))
-        ranking = rrf(rankings)
-        direct = self.direct_hits(query)
-        if direct:
-            ranked = set(ranking)
-            ordered = [i for i in ranking if i in direct] + sorted(direct - ranked)
-            ranking = ordered + [i for i in ranking if i not in direct]
+        regulations = find_regulations(query, self.titles)
+        if len(regulations) >= 2:
+            ranking = self.comparison_ranking(query, mode, regulations)
+        else:
+            ranking = self.pin_first(self.base_ranking(query, mode), self.direct_hits(query))
         return [self.chunks[i] for i in ranking[:k]]
 
 
