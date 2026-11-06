@@ -10,7 +10,7 @@ from search import CHUNK_DIR, DEFAULT_MODEL, INDEX_DIR, Searcher, cached_vectors
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-from eval_search import evaluate, hit_rank, load_questions  # noqa: E402
+from eval_search import evaluate, group_scores, hit_rank, load_questions  # noqa: E402
 
 TARGET = 0.8
 
@@ -27,6 +27,18 @@ def result(regulation, body):
 def test_hit_rank_ignores_whitespace():
     results = [result("선수 규정", "무관"), result("선수 규정", "최소\n5개월에서")]
     assert hit_rank(results, question()) == 2
+
+
+def test_hit_rank_needs_all_evidence():
+    gold = question("선수 규정||경기 규정", "최소 5개월||좌석 수")
+    first = result("선수 규정", "최소 5개월")
+    second = result("경기 규정", "좌석 수")
+    assert hit_rank([first], gold) is None
+    assert hit_rank([first, result("경기 규정", "무관"), second], gold) == 3
+
+
+def test_group_scores_split_base_and_added():
+    assert group_scores({"Q01": 1, "Q21": None, "Q22": 2, "Q31": None}) == ("1/2", "1/2")
 
 
 def test_hit_rank_requires_same_regulation():

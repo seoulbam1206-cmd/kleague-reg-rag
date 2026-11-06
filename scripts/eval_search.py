@@ -5,6 +5,7 @@
 
 판정: 근거 문구가 상위 k개 청크 본문에 있으면 맞은 것으로 본다. 조문 청크와 고정 길이
 청크를 같은 기준으로 비교하기 위해서다. 규정에 없는 내용을 묻는 질문은 제외한다.
+규정 간 비교 질문은 근거가 여러 곳이며(열 안에서 ||로 구분) 모두 찾아야 맞은 것으로 본다.
 """
 
 import argparse
@@ -23,6 +24,8 @@ QUESTIONS = ROOT / "eval" / "questions.csv"
 RESULTS = ROOT / "eval" / "search_results.md"
 TOP_K = 5
 CHUNKERS = ("article", "fixed")
+SEPARATOR = "||"
+BASE_QUESTIONS = 21  # 1차 질문지 문항 수
 
 
 def load_questions(path: Path = QUESTIONS) -> list[dict]:
@@ -34,13 +37,23 @@ def squeeze(text: str) -> str:
     return re.sub(r"\s+", "", text)
 
 
-def hit_rank(results: list[dict], question: dict) -> int | None:
-    """근거 문구가 들어 있는 첫 청크의 순위(1부터)를 돌려준다."""
-    evidence = squeeze(question["근거 문구"])
+def split_gold(value: str) -> list[str]:
+    return [part.strip() for part in value.split(SEPARATOR)]
+
+
+def evidence_rank(results: list[dict], regulation: str, evidence: str) -> int | None:
+    target = squeeze(evidence)
     for rank, chunk in enumerate(results, 1):
-        if chunk["regulation"] == question["정답 규정명"] and evidence in squeeze(chunk["body"]):
+        if chunk["regulation"] == regulation and target in squeeze(chunk["body"]):
             return rank
     return None
+
+
+def hit_rank(results: list[dict], question: dict) -> int | None:
+    """근거를 모두 찾은 순위(1부터)를 돌려준다. 하나라도 없으면 None이다."""
+    pairs = zip(split_gold(question["정답 규정명"]), split_gold(question["근거 문구"]))
+    ranks = [evidence_rank(results, regulation, text) for regulation, text in pairs]
+    return None if None in ranks else max(ranks)
 
 
 def evaluate(searcher: Searcher, questions: list[dict], mode: str, k: int = TOP_K) -> dict:
@@ -56,7 +69,16 @@ def evaluate(searcher: Searcher, questions: list[dict], mode: str, k: int = TOP_
         "mrr": sum(1 / r for r in found) / len(questions),
         "by_type": dict(by_type),
         "missed": [number for number, rank in ranks.items() if rank is None],
+        "ranks": ranks,
     }
+
+
+def group_scores(ranks: dict[str, int | None]) -> tuple[str, str]:
+    """기존 문항과 추가 문항의 정답 수를 따로 센다."""
+    groups: tuple[list, list] = ([], [])
+    for number, rank in ranks.items():
+        groups[int(number[1:]) > BASE_QUESTIONS].append(rank is not None)
+    return tuple(f"{sum(g)}/{len(g)}" for g in groups)
 
 
 def report(rows: list[dict], questions: list[dict]) -> str:
@@ -76,6 +98,16 @@ def report(rows: list[dict], questions: list[dict]) -> str:
             f"{result['top1']:.0%} | {result['mrr']:.2f} | {types} | "
             f"{' '.join(result['missed']) or '-'} |"
         )
+    lines += [
+        "",
+        "## 문항 묶음별 상위5 정답률",
+        "",
+        "| 청킹 | 검색 | 임베딩 | 기존 문항 | 추가 문항 |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for row in rows:
+        base, added = group_scores(row["result"]["ranks"])
+        lines.append(f"| {row['chunker']} | {row['mode']} | {row['model']} | {base} | {added} |")
     return "\n".join(lines) + "\n"
 
 
