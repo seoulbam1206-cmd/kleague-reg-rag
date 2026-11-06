@@ -23,3 +23,6 @@ __pycache__/
 
 # 규정 PDF: 저장소에 올리지 않음 (scripts/download_regulations.py로 받음)
 docs_public/*.pdf
+
+# PDF에서 추출한 산출물: PDF와 같은 이유로 저장소에 올리지 않음
+data/
