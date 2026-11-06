@@ -3,7 +3,8 @@
 ## 사용자 확인 필요
 이 섹션에 항목이 남아 있으면 다음 단계로 넘어가지 않는다.
 
-- 없음
+- [ ] `.env` 작성: `env.example`을 복사해 `OPENAI_API_KEY`와 `OPENAI_MODEL`을 채우기. 모델 이름은 OpenAI 문서에서 확인
+- [ ] 실제 LLM 10문항 실행과 답변 확인: `.venv/Scripts/python scripts/eval_answer.py` 실행 후 `eval/answer_results.md`를 정답 요지와 비교
 
 ## 2026-11-05
 ### 한 일
@@ -138,5 +139,18 @@
 - Q30은 근거 문구가 제7조뿐 아니라 별첨1 일람표에도 있어 별첨1로 맞음
 - Q31은 질문에 규정명이 없어 규정별 검색 대상이 아님. 조건을 넓히지 않음
 
+### PLAN 4단계 진행: LLM 답변
+- `src/answer.py` 작성. OpenAI Responses API 사용, 키와 모델 이름은 `.env`에서 읽음
+- 모델 이름은 기본값을 두지 않음. 문서마다 이름이 달라 추측한 값이 실패할 수 있음
+- 인용은 코드가 메타데이터로 생성. 유효한 근거 번호가 없으면 찾을 수 없음으로 처리
+- 외부 전송은 `visibility: public` 허용 목록 방식. 전송 전 차단을 테스트로 확인
+- 시행 전 규정을 인용하면 `시행 전 (YYYY-MM-DD 시행 예정)` 표시
+- 검색 결과가 없으면 LLM을 호출하지 않음
+- `scripts/eval_answer.py`: 결과를 보기 전에 정한 10문항을 실행해 `eval/answer_results.md`에 저장
+- 테스트는 가짜 LLM만 사용. 실제 OpenAI 호출은 아직 한 번도 하지 않음
+- 남은 완료 기준: 평가 질문 10개를 실제 LLM으로 돌려 사람이 확인
+
 ### 다음 할 일
-- PLAN 4단계 `src/answer.py`
+- `.env` 작성 후 답변 평가 10문항 실행
+- 결과로 융합 약점(Q22)과 표 안의 표(Q17) 처리를 판단
+- 4단계 완료 후 PLAN 5단계 Streamlit 화면

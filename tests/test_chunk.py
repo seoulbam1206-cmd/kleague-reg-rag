@@ -262,6 +262,7 @@ def test_every_chunk_has_metadata(docs, chunks):
             assert c["article_no"]
             assert c["effective_date"] == docs[no]["effective_date"]
             assert c["enforcement_date"] == docs[no]["enforcement_date"]
+            assert c["visibility"] == "public"
             assert c["pages"]
             assert c["body"].strip()
             assert c["text"].startswith(f"[{docs[no]['title']}] ")

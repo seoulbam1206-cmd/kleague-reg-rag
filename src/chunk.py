@@ -302,6 +302,7 @@ def segment_chunks(doc: dict, segment: dict) -> list[dict]:
             "effective_date": doc["effective_date"],
             "effective_kind": doc["effective_kind"],
             "enforcement_date": doc["enforcement_date"],
+            "visibility": "public",  # 외부 API 전송 허용 표시. 비공개 문서에는 쓰지 않는다
             "pages": sorted({page for page, _ in unit}),
             "body": body,
             "text": "\n".join([label, *header, body]),
@@ -377,6 +378,7 @@ def fixed_chunks(doc: dict, size: int = FIXED_SIZE, overlap: int = FIXED_OVERLAP
             "effective_date": doc["effective_date"],
             "effective_kind": doc["effective_kind"],
             "enforcement_date": doc["enforcement_date"],
+            "visibility": "public",  # 외부 API 전송 허용 표시. 비공개 문서에는 쓰지 않는다
             "pages": [p for s, e, p in spans if s < end and e > start],
             "body": body,
             "text": f"[{doc['title']}]\n{body}",

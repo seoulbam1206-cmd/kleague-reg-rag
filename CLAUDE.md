@@ -37,4 +37,6 @@ K리그 규정 문서에 근거해 조문을 인용하며 답하는 RAG 챗봇.
 .venv/Scripts/python src/extract.py                       # PDF 추출 (data/extracted)
 .venv/Scripts/python src/chunk.py                         # 청킹 (data/chunks)
 .venv/Scripts/python scripts/eval_search.py --model intfloat/multilingual-e5-small  # 검색 평가
+.venv/Scripts/python src/answer.py "질문"                  # 질문하기 (.env 필요)
+.venv/Scripts/python scripts/eval_answer.py               # 답변 평가 10문항 (.env 필요, OpenAI 과금)
 ```
