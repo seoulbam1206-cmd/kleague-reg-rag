@@ -90,6 +90,19 @@ def rrf(rankings: list[list[int]]) -> list[int]:
     return sorted(scores, key=lambda index: (-scores[index], index))
 
 
+def keep_in_top(ranking: list[int], keep: list[int], k: int) -> list[int]:
+    """keep이 상위 k개 밖이면 k번째 자리로 올린다.
+
+    순위 융합은 한쪽 검색에만 잡힌 결과를 낮춘다. 키워드 1위가 밀려 근거가 LLM에 전달되지
+    않으면 답이 있는데도 찾을 수 없다고 답하게 된다 (평가 질문 Q22).
+    """
+    for index in keep:
+        if index not in ranking[:k]:
+            rest = [i for i in ranking if i != index]
+            ranking = rest[:k - 1] + [index] + rest[k - 1:]
+    return ranking
+
+
 def _squeeze(text: str) -> str:
     return re.sub(r"\s+", "", text)
 
@@ -219,7 +232,10 @@ class Searcher:
         if len(regulations) >= 2:
             ranking = self.comparison_ranking(query, mode, regulations)
         else:
-            ranking = self.pin_first(self.base_ranking(query, mode), self.direct_hits(query))
+            direct = self.direct_hits(query)
+            ranking = self.pin_first(self.base_ranking(query, mode), direct)
+            if mode == "hybrid" and not direct:
+                ranking = keep_in_top(ranking, self.keyword_ranking(query)[:1], k)
         return [self.chunks[i] for i in ranking[:k]]
 
 

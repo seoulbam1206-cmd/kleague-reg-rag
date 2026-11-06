@@ -10,6 +10,7 @@ from search import (
     article_keys,
     find_regulation,
     find_regulations,
+    keep_in_top,
     load_chunks,
     rrf,
     tokenize,
@@ -176,6 +177,63 @@ def test_comparison_keeps_article_numbers_with_their_regulation():
 def test_single_regulation_query_is_not_split():
     results = Searcher(SAMPLE).search("선수 규정 계약", k=5, mode="keyword")
     assert results[0]["regulation"] == "선수 규정"
+
+
+@pytest.mark.parametrize(
+    "ranking, keep, k, expected",
+    [
+        ([1, 2, 3, 4, 5, 6, 7], [7], 5, [1, 2, 3, 4, 7, 5, 6]),  # 밖이면 k번째 자리로
+        ([1, 2, 3, 4, 5, 6], [2], 5, [1, 2, 3, 4, 5, 6]),  # 이미 안이면 그대로
+        ([1, 2, 3], [], 5, [1, 2, 3]),  # 키워드 결과가 없을 때
+    ],
+)
+def test_keep_in_top(ranking, keep, k, expected):
+    assert keep_in_top(ranking, keep, k) == expected
+
+
+class ScriptedSearcher(Searcher):
+    """키워드와 임베딩 순위를 지정해 융합 동작만 확인한다."""
+
+    def __init__(self, chunks, keyword, embedding):
+        super().__init__(chunks, encoder=FakeEncoder())
+        self.keyword = keyword
+        self.embedding = embedding
+
+    def keyword_ranking(self, query):
+        return self.keyword
+
+    def embedding_ranking(self, query):
+        return self.embedding
+
+
+def many_chunks():
+    return [chunk("안전 규정", f"제{i}조", f"내용 {i}") for i in range(1, 11)]
+
+
+def test_hybrid_keeps_keyword_first_when_embedding_misses():
+    keyword = [0, 1, 2, 3, 4, 5, 6]
+    embedding = [1, 2, 3, 4, 5, 6, 7, 8, 9]  # 0번 청크를 찾지 못함
+    searcher = ScriptedSearcher(many_chunks(), keyword, embedding)
+    ids = [c["article_no"] for c in searcher.search("질문", k=5)]
+    assert "제1조" in ids
+    assert len(ids) == len(set(ids)) == 5
+
+
+def test_embedding_first_is_not_guaranteed():
+    keyword = [1, 2, 3, 4, 5, 6, 7, 8]
+    embedding = [0, 1, 2, 3, 4, 5, 6, 7, 8]  # 0번은 임베딩 1위, 키워드에는 없음
+    searcher = ScriptedSearcher(many_chunks(), keyword, embedding)
+    ranking = rrf([keyword, embedding])
+    assert 0 not in ranking[:5]
+    assert "제1조" not in [c["article_no"] for c in searcher.search("질문", k=5)]
+
+
+def test_keyword_guarantee_skips_direct_article_lookup():
+    chunks = [chunk("선수 규정", f"제{i}조", f"내용 {i}") for i in range(1, 11)]
+    searcher = ScriptedSearcher(chunks, [9, 1, 2], [1, 2, 3, 4, 5, 6, 7, 8, 0])
+    results = searcher.search("선수 규정 제1조", k=2)
+    assert results[0]["article_no"] == "제1조"
+    assert "제10조" not in [c["article_no"] for c in results]
 
 
 def test_article_number_without_regulation_is_not_forced():

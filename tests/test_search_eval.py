@@ -102,4 +102,6 @@ def test_hybrid_search_meets_target(chunks):
 
     encoder = OnnxEncoder(DEFAULT_MODEL)
     searcher = Searcher(chunks, encoder=encoder, vectors=cached_vectors(encoder, chunks, "article", INDEX_DIR))
-    assert evaluate(searcher, load_questions(), "hybrid")["hit"] >= TARGET
+    outcome = evaluate(searcher, load_questions(), "hybrid")
+    assert outcome["hit"] >= TARGET
+    assert "Q22" not in outcome["missed"]  # 키워드 1위 보장
