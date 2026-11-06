@@ -3,7 +3,7 @@
     python scripts/eval_answer.py
 
 문항은 결과를 보기 전에 정했다. 유형별 대표 문항과, 앞 단계에서 위험하다고 표시한 문항이다.
-규정 내용 일부가 OpenAI로 전송되므로 공개 규정 청크만 쓴다.
+규정 내용 일부가 .env의 LLM_PROVIDER 서버로 전송되므로 공개 규정 청크만 쓴다.
 """
 
 import csv
@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from answer import OpenAILLM, answer_question, build_searcher  # noqa: E402
+from answer import answer_question, build_searcher, create_llm  # noqa: E402
 
 QUESTIONS = ROOT / "eval" / "questions.csv"
 RESULTS = ROOT / "eval" / "answer_results.md"
@@ -36,8 +36,10 @@ def load_review_questions(path: Path = QUESTIONS) -> list[dict]:
         return [row for row in csv.DictReader(f) if row["번호"] in REVIEW_SET]
 
 
-def render(rows: list[tuple[dict, dict]]) -> str:
+def render(rows: list[tuple[dict, dict]], model: str = "") -> str:
     lines = ["# 답변 평가 결과", "", "사람이 읽고 정답 요지와 비교해 확인한다.", ""]
+    if model:
+        lines += [f"모델: {model}", ""]
     for question, result in rows:
         number = question["번호"]
         lines += [
@@ -60,9 +62,9 @@ def run(llm, searcher, questions: list[dict], mode: str = "hybrid") -> list[tupl
 
 
 def main() -> int:
-    llm = OpenAILLM()
+    llm = create_llm()
     rows = run(llm, build_searcher(), load_review_questions())
-    RESULTS.write_text(render(rows), encoding="utf-8")
+    RESULTS.write_text(render(rows, llm.name), encoding="utf-8")
     print(f"저장: {RESULTS}")
     return 0
 

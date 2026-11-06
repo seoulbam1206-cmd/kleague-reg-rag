@@ -3,8 +3,8 @@
 ## 사용자 확인 필요
 이 섹션에 항목이 남아 있으면 다음 단계로 넘어가지 않는다.
 
-- [ ] `.env` 작성: `env.example`을 복사해 `OPENAI_API_KEY`와 `OPENAI_MODEL`을 채우기. 모델 이름은 OpenAI 문서에서 확인
-- [ ] 실제 LLM 10문항 실행과 답변 확인: `.venv/Scripts/python scripts/eval_answer.py` 실행 후 `eval/answer_results.md`를 정답 요지와 비교
+- [ ] `.env` 작성: `env.example`을 복사해 `GROQ_API_KEY`와 `GROQ_MODEL`을 채우기. 모델 후보는 2026-11-06 기록의 "Groq 추가" 참고
+- [ ] 실제 LLM 10문항 실행과 답변 확인: `scripts/eval_answer.py` 실행 후 `eval/answer_results.md`를 정답 요지와 비교
 
 ## 2026-11-05
 ### 한 일
@@ -149,6 +149,15 @@
 - `scripts/eval_answer.py`: 결과를 보기 전에 정한 10문항을 실행해 `eval/answer_results.md`에 저장
 - 테스트는 가짜 LLM만 사용. 실제 OpenAI 호출은 아직 한 번도 하지 않음
 - 남은 완료 기준: 평가 질문 10개를 실제 LLM으로 돌려 사람이 확인
+
+### Groq 추가
+- `.env`의 `LLM_PROVIDER`로 groq(기본값)와 openai 선택. `create_llm()`이 고르며 OpenAI SDK의 base_url만 바꿈
+- Groq의 Responses API는 베타이며 지금 쓰는 `instructions`, `input`은 지원됨
+- Groq도 외부 서버이므로 공개 청크만 전송. 두 provider 모두 차단을 테스트로 확인
+- 사용량 제한(429)에 대비해 재시도 5회. 10문항 프롬프트 합계 약 4만 3천 자
+- `eval/answer_results.md`에 사용한 모델 이름 기록
+- 모델 후보 (Groq 문서 기준, 한국어 품질은 미측정): `openai/gpt-oss-120b`, `qwen/qwen3.8-27b`(프리뷰), `openai/gpt-oss-20b`
+- 실제 Groq 호출은 아직 하지 않음
 
 ### 다음 할 일
 - `.env` 작성 후 답변 평가 10문항 실행

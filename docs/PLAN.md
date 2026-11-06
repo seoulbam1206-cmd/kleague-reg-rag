@@ -61,7 +61,7 @@ PDF → 텍스트 추출 → 조문 단위 청킹 → 검색 → LLM 답변 → 
 ## 4단계. LLM 답변 🔄
 - 내용: `src/answer.py`로 검색 결과만 근거로 답하고, 규정명·조 번호·기준일을 인용한다.
 - 처리할 것: LLM을 교체할 수 있게 만든다 (외부 API 모드 / 로컬 LLM 모드).
-- 외부 API: OpenAI. 키와 모델 이름은 `.env`에서 읽는다 (`env.example` 참고)
+- 외부 API: `.env`의 `LLM_PROVIDER`로 groq(기본값)와 openai 중 선택. 둘 다 OpenAI 호환 API이며 키, 모델 이름, base_url만 다르다 (`env.example` 참고)
 - 결정 필요: 로컬 LLM 모델. 지금은 교체용 인터페이스만 있고 로컬 구현은 없다
 - 인용 목록은 코드가 검색 결과의 메타데이터로 만들고, 유효한 근거 번호가 없는 답변은 내보내지 않는다
 - 외부 API에는 `visibility`가 `public`인 청크만 보낸다. 표시가 없으면 차단한다

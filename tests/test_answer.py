@@ -1,5 +1,6 @@
 """답변 검증. LLM은 가짜 객체로 대체하므로 외부 API를 호출하지 않는다."""
 
+import os
 import sys
 from datetime import date
 from pathlib import Path
@@ -16,6 +17,7 @@ from answer import (
     answer_question,
     build_user_prompt,
     cited_numbers,
+    create_llm,
 )
 from search import CHUNK_DIR, Searcher, load_chunks
 
@@ -194,6 +196,112 @@ def test_missing_key_is_clear_error(clean_env, monkeypatch):
         OpenAILLM(env_file=clean_env)
 
 
+@pytest.fixture
+def provider_env(monkeypatch, tmp_path):
+    """provider 관련 환경 변수를 비우고, 테스트 뒤 .env에서 읽힌 값도 지운다."""
+    names = ["LLM_PROVIDER", "OPENAI_API_KEY", "OPENAI_MODEL", "GROQ_API_KEY", "GROQ_MODEL"]
+    for name in names:
+        monkeypatch.delenv(name, raising=False)
+    yield tmp_path / "test.env"
+    for name in names:
+        os.environ.pop(name, None)
+
+
+def write_env(path, **values):
+    path.write_text("".join(f"{k}={v}\n" for k, v in values.items()), encoding="utf-8")
+
+
+def record_openai_client(monkeypatch):
+    """OpenAI 클라이언트 생성을 가로채 인자를 기록한다. 네트워크를 쓰지 않는다."""
+    captured = {}
+
+    def fake(**kwargs):
+        captured.update(kwargs)
+        return fake_client({})
+
+    monkeypatch.setattr("openai.OpenAI", fake)
+    return captured
+
+
+def test_groq_is_default_provider(provider_env):
+    write_env(provider_env, GROQ_MODEL="groq-model", OPENAI_MODEL="openai-model")
+    llm = create_llm(client=fake_client({}), env_file=provider_env)
+    assert llm.name == "groq/groq-model"
+
+
+def test_openai_provider_is_selected(provider_env, monkeypatch):
+    write_env(provider_env, LLM_PROVIDER="openai", OPENAI_API_KEY="o-key", OPENAI_MODEL="o-model",
+              GROQ_API_KEY="g-key", GROQ_MODEL="g-model")
+    captured = record_openai_client(monkeypatch)
+    llm = create_llm(env_file=provider_env)
+    assert llm.name == "openai/o-model"
+    assert captured["api_key"] == "o-key"
+    assert captured["base_url"] is None
+
+
+def test_groq_provider_uses_groq_base_url_and_key(provider_env, monkeypatch):
+    write_env(provider_env, LLM_PROVIDER="groq", OPENAI_API_KEY="o-key", OPENAI_MODEL="o-model",
+              GROQ_API_KEY="g-key", GROQ_MODEL="g-model")
+    captured = record_openai_client(monkeypatch)
+    llm = create_llm(env_file=provider_env)
+    assert llm.name == "groq/g-model"
+    assert captured["api_key"] == "g-key"
+    assert captured["base_url"] == "https://api.groq.com/openai/v1"
+    assert captured["max_retries"] >= 2
+
+
+def test_provider_value_ignores_case_and_spaces(provider_env):
+    write_env(provider_env, LLM_PROVIDER=" GROQ ", GROQ_MODEL="g-model")
+    assert create_llm(client=fake_client({}), env_file=provider_env).name == "groq/g-model"
+
+
+@pytest.mark.parametrize(
+    "provider, model", [("openai", "o-model"), ("groq", "g-model")],
+)
+def test_both_providers_send_model_and_prompt(provider_env, provider, model):
+    write_env(provider_env, LLM_PROVIDER=provider, OPENAI_MODEL="o-model", GROQ_MODEL="g-model")
+    captured = {}
+    llm = create_llm(client=fake_client(captured), env_file=provider_env)
+    assert llm.complete("시스템", "질문") == "답변 [1]"
+    assert captured == {"model": model, "instructions": "시스템", "input": "질문"}
+
+
+@pytest.mark.parametrize("provider", ["openai", "groq"])
+def test_both_providers_block_confidential_chunks(provider_env, provider):
+    write_env(provider_env, LLM_PROVIDER=provider, OPENAI_MODEL="o-model", GROQ_MODEL="g-model")
+    captured = {}
+    llm = create_llm(client=fake_client(captured), env_file=provider_env)
+    assert llm.external is True
+    with pytest.raises(ConfidentialDataError):
+        ask(llm, [chunk(visibility="private")])
+    assert captured == {}
+
+
+def test_unknown_provider_is_rejected(provider_env):
+    write_env(provider_env, LLM_PROVIDER="other")
+    with pytest.raises(MissingConfigError, match="LLM_PROVIDER"):
+        create_llm(env_file=provider_env)
+
+
+def test_missing_groq_settings_are_clear_errors(provider_env):
+    write_env(provider_env, LLM_PROVIDER="groq")
+    with pytest.raises(MissingConfigError, match="GROQ_MODEL"):
+        create_llm(env_file=provider_env)
+    write_env(provider_env, LLM_PROVIDER="groq", GROQ_MODEL="g-model")
+    with pytest.raises(MissingConfigError, match="GROQ_API_KEY"):
+        create_llm(env_file=provider_env)
+
+
+def test_env_example_lists_settings_without_values():
+    example = Path(__file__).resolve().parent.parent / "env.example"
+    lines = example.read_text(encoding="utf-8").splitlines()
+    settings = dict(line.split("=", 1) for line in lines if line and not line.startswith("#"))
+    assert settings == {
+        "LLM_PROVIDER": "groq", "GROQ_API_KEY": "", "GROQ_MODEL": "",
+        "OPENAI_API_KEY": "", "OPENAI_MODEL": "",
+    }
+
+
 def test_review_set_has_ten_questions():
     assert len(load_review_questions()) == 10 == len(REVIEW_SET)
 
@@ -202,6 +310,12 @@ def test_run_asks_every_question():
     questions = load_review_questions()
     rows = run(_KeywordOnly(), Searcher([chunk()]), questions[:2], mode="keyword")
     assert len(rows) == 2
+
+
+def test_review_report_records_model():
+    question = load_review_questions()[0]
+    report = render([(question, {"text": "답변", "not_found": False})], "groq/g-model")
+    assert "모델: groq/g-model" in report
 
 
 def test_review_report_shows_question_gold_and_answer():

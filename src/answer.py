@@ -20,6 +20,18 @@ from search import DEFAULT_MODEL, OnnxEncoder, Searcher, cached_vectors, load_ch
 ROOT = Path(__file__).resolve().parent.parent
 ENV_FILE = ROOT / ".env"
 
+DEFAULT_PROVIDER = "groq"
+# OpenAI 호환 API이므로 provider마다 키 이름과 base_url만 다르다
+PROVIDERS = {
+    "openai": {"key": "OPENAI_API_KEY", "model": "OPENAI_MODEL", "base_url": None},
+    "groq": {
+        "key": "GROQ_API_KEY",
+        "model": "GROQ_MODEL",
+        "base_url": "https://api.groq.com/openai/v1",
+    },
+}
+MAX_RETRIES = 5  # 사용량 제한(429)에 걸리면 서버가 알려준 시간만큼 기다렸다 다시 시도한다
+
 NOT_FOUND = "규정에서 찾을 수 없습니다."
 TOP_K = 5
 CITATION = re.compile(r"\[(\d{1,2})\]")
@@ -52,29 +64,43 @@ class LLM(Protocol):
 
 
 class OpenAILLM:
-    """OpenAI Responses API. 키와 모델 이름은 .env에서 읽는다."""
+    """OpenAI 호환 Responses API. provider의 키와 모델 이름은 .env에서 읽는다."""
 
-    external = True
+    external = True  # openai, groq 모두 PC 밖의 서버다
 
-    def __init__(self, client=None, env_file: Path | None = None):
+    def __init__(self, client=None, env_file: Path | None = None, provider: str = "openai"):
         from dotenv import load_dotenv
 
         load_dotenv(env_file or ENV_FILE)
-        self.model = os.environ.get("OPENAI_MODEL", "").strip()
+        config = PROVIDERS[provider]
+        self.model = os.environ.get(config["model"], "").strip()
         if not self.model:
-            raise MissingConfigError(".env에 OPENAI_MODEL을 지정해야 한다")
+            raise MissingConfigError(f".env에 {config['model']}을 지정해야 한다")
+        self.name = f"{provider}/{self.model}"
         if client is None:
             from openai import OpenAI
 
-            key = os.environ.get("OPENAI_API_KEY", "").strip()
+            key = os.environ.get(config["key"], "").strip()
             if not key:
-                raise MissingConfigError(".env에 OPENAI_API_KEY를 지정해야 한다")
-            client = OpenAI(api_key=key)
+                raise MissingConfigError(f".env에 {config['key']}를 지정해야 한다")
+            client = OpenAI(api_key=key, base_url=config["base_url"], max_retries=MAX_RETRIES)
         self.client = client
 
     def complete(self, system: str, user: str) -> str:
         response = self.client.responses.create(model=self.model, instructions=system, input=user)
         return response.output_text
+
+
+def create_llm(client=None, env_file: Path | None = None) -> OpenAILLM:
+    """.env의 LLM_PROVIDER로 LLM을 고른다. 값이 없으면 groq를 쓴다."""
+    from dotenv import load_dotenv
+
+    path = env_file or ENV_FILE
+    load_dotenv(path)
+    provider = os.environ.get("LLM_PROVIDER", "").strip().lower() or DEFAULT_PROVIDER
+    if provider not in PROVIDERS:
+        raise MissingConfigError(f"LLM_PROVIDER는 {', '.join(PROVIDERS)} 중 하나여야 한다")
+    return OpenAILLM(client=client, env_file=path, provider=provider)
 
 
 def chunk_label(chunk: dict) -> str:
@@ -185,7 +211,7 @@ def main() -> int:
     if len(sys.argv) != 2:
         print('사용법: python src/answer.py "질문"')
         return 2
-    print(answer_question(sys.argv[1], build_searcher(), OpenAILLM())["text"])
+    print(answer_question(sys.argv[1], build_searcher(), create_llm())["text"])
     return 0
 
 
