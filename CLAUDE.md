@@ -24,6 +24,8 @@ K리그 규정 문서에 근거해 조문을 인용하며 답하는 RAG 챗봇.
 - 규정 기준일은 등록일(`registered`)이 아니라 `docs_public/manifest.json`의 개정일(`body_text`)을 쓴다.
 - `body_text` 형식은 `2026년 6월 17일 개정`, `2026/01/16 개정`, `2020년 11월 5일 기준`, `2024년 1월 15일 제정`으로 섞여 있다.
 - 파일명의 날짜는 등록일이므로 기준일로 쓰지 않는다.
+- 기준일은 `effective_date`, 시행일은 `enforcement_date`다. 이름과 달리 `effective_date`는 시행일이 아니다.
+- 시행일 규칙은 `docs_public/manual/enforcement.json`에 있다. 시행일이 오늘 이후면 답변에 `시행 전 (YYYY-MM-DD 시행 예정)`을 표시한다.
 
 ## 자주 쓰는 명령어
 ```

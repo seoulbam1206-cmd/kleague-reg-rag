@@ -3,11 +3,13 @@
 import csv
 import re
 from collections import Counter
+from datetime import date
 from pathlib import Path
 
 import pytest
 
 from chunk import EXTRACTED_DIR, article_chunks, load_documents
+from enforcement import enforcement_notice
 
 QUESTIONS = Path(__file__).resolve().parent.parent / "eval" / "questions.csv"
 COLUMNS = ["번호", "유형", "질문", "정답 규정명", "정답 조번호", "항", "쪽", "정답 요지", "근거 문구"]
@@ -30,8 +32,8 @@ def test_columns():
 
 def test_question_mix():
     rows = load_rows()
-    assert len(rows) == 20
-    assert len({r["번호"] for r in rows}) == 20
+    assert len(rows) == 21
+    assert len({r["번호"] for r in rows}) == 21
     counts = Counter(r["유형"] for r in rows)
     assert counts["없음"] == 2
     assert min(counts["조번호"], counts["내용"], counts["표"]) >= 3
@@ -80,6 +82,14 @@ def test_evidence_is_on_stated_page():
             continue
         page = docs[row["정답 규정명"]]["pages"][int(row["쪽"]) - 1]
         assert squeeze(row["근거 문구"]) in squeeze(page["text"]), row["번호"]
+
+
+def test_enforcement_question_matches_notice(chunks):
+    row = next(r for r in load_rows() if r["유형"] == "시행일")
+    found = next(c for c in chunks if c["regulation"] == row["정답 규정명"])
+    notice = enforcement_notice(found["enforcement_date"], today=date(2026, 11, 6))
+    assert notice == "시행 전 (2027-01-01 시행 예정)"
+    assert notice in row["정답 요지"]
 
 
 def test_absent_topics_are_really_absent(chunks):

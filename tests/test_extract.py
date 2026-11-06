@@ -131,6 +131,13 @@ def test_effective_dates(docs):
 
 
 @pytest.mark.slow
+def test_enforcement_date_is_separate_from_effective_date(docs):
+    assert docs[16]["effective_date"] == "2024-11-29"
+    assert docs[16]["enforcement_date"] == "2027-01-01"
+    assert "제28조" in docs[16]["enforcement_basis"]
+
+
+@pytest.mark.slow
 def test_effective_date_is_not_registered_date(docs):
     assert docs[15]["registered"] == "2024.03.27"
     assert docs[15]["effective_date"] == "2026-01-16"

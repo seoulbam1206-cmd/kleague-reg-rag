@@ -18,6 +18,10 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from check_pdfs import TABLE_SETTINGS  # noqa: E402
 
+sys.path.insert(0, str(ROOT / "src"))
+
+from enforcement import load_enforcement_rules, resolve_enforcement  # noqa: E402
+
 PDF_DIR = ROOT / "docs_public"
 MANUAL_DIR = PDF_DIR / "manual"
 OUT_DIR = ROOT / "data" / "extracted"
@@ -201,6 +205,9 @@ def extract_pdf(path: Path, manual: dict[tuple[str, int], str] | None = None) ->
 
 def extract_document(entry: dict, pdf_dir: Path = PDF_DIR, manual: dict | None = None) -> dict:
     revision = parse_revision(entry["body_text"])
+    enforcement = resolve_enforcement(
+        entry["no"], revision["date"], load_enforcement_rules()
+    )
     file_name = entry["files"][0]["file"]
     return {
         "no": entry["no"],
@@ -210,6 +217,8 @@ def extract_document(entry: dict, pdf_dir: Path = PDF_DIR, manual: dict | None =
         "registered": entry["registered"],
         "effective_date": revision["date"],
         "effective_kind": revision["kind"],
+        "enforcement_date": enforcement["date"],
+        "enforcement_basis": enforcement["basis"],
         "revision_note": entry["body_text"],
         "pages": extract_pdf(pdf_dir / file_name, manual),
     }

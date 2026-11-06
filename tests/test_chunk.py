@@ -45,6 +45,7 @@ FIRST_LAST = {
 def doc_with(lines, no=1, title="테스트 규정"):
     return {
         "no": no, "title": title, "effective_date": "2026-01-16", "effective_kind": "개정",
+        "enforcement_date": "2026-01-16",
         "pages": [{"page": 3, "kind": "body", "text": "\n".join(lines)}],
     }
 
@@ -260,6 +261,7 @@ def test_every_chunk_has_metadata(docs, chunks):
             assert c["regulation"] == docs[no]["title"]
             assert c["article_no"]
             assert c["effective_date"] == docs[no]["effective_date"]
+            assert c["enforcement_date"] == docs[no]["enforcement_date"]
             assert c["pages"]
             assert c["body"].strip()
             assert c["text"].startswith(f"[{docs[no]['title']}] ")
