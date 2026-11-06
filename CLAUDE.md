@@ -34,4 +34,7 @@ K리그 규정 문서에 근거해 조문을 인용하며 답하는 RAG 챗봇.
 .venv/Scripts/python -m pytest                            # 커밋 전: 전체 테스트 (약 3분)
 .venv/Scripts/python scripts/download_regulations.py      # 규정 다운로드/갱신
 .venv/Scripts/python scripts/check_pdfs.py --tables       # PDF 추출 가능 여부 점검
+.venv/Scripts/python src/extract.py                       # PDF 추출 (data/extracted)
+.venv/Scripts/python src/chunk.py                         # 청킹 (data/chunks)
+.venv/Scripts/python scripts/eval_search.py --model intfloat/multilingual-e5-small  # 검색 평가
 ```

@@ -2,3 +2,7 @@ requests
 beautifulsoup4
 pytest
 pdfplumber
+numpy
+onnxruntime
+tokenizers
+huggingface_hub
