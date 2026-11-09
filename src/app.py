@@ -3,20 +3,26 @@
     streamlit run src/app.py
 
 질문 하나에 답변 하나만 보여준다. 답변 아래에 인용한 조문의 원문을 펼쳐 볼 수 있다.
-검색기와 LLM은 처음 한 번만 만든다. 테스트는 session_state의 searcher, llm에 가짜 객체를 넣는다.
+검색기와 LLM은 처음 한 번만 만든다. 테스트는 session_state의 searcher, llm, limiter에 가짜 객체를 넣는다.
+배포 환경에서는 첫 화면이 열릴 때 규정 PDF를 받아 청크를 만든다 (bootstrap.py).
 """
 
+import os
 import re
+import threading
 import time
 
 import streamlit as st
 
+import bootstrap
 from answer import MissingConfigError, answer_question, build_searcher, chunk_label, create_llm
-from enforcement import enforcement_notice
+from enforcement import chunk_notice
+from limits import UsageLimiter
 
 MAX_QUESTION_CHARS = 500
 MIN_INTERVAL_SECONDS = 5
 
+PORTFOLIO_NOTICE = "한국프로축구연맹 공식 서비스가 아닌 개인 포트폴리오 프로젝트입니다. 답변은 공식 해석이 아닙니다."
 DISCLAIMER = "AI 답변은 틀릴 수 있습니다. 중요한 내용은 아래 근거 조문 원문을 꼭 확인하세요."
 MSG_EMPTY = "질문을 입력해 주세요."
 MSG_TOO_LONG = f"질문은 {MAX_QUESTION_CHARS}자 이내로 입력해 주세요."
@@ -24,6 +30,7 @@ MSG_TOO_FAST = f"질문은 {MIN_INTERVAL_SECONDS}초에 한 번씩 할 수 있�
 MSG_LOAD_ERROR = "검색 데이터를 불러오지 못했습니다. 관리자에게 문의해 주세요."
 MSG_CONFIG_ERROR = "LLM 설정이 없어 답변할 수 없습니다. 관리자에게 문의해 주세요."
 MSG_LLM_ERROR = "답변을 만드는 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
+MSG_PREPARE_ERROR = "규정 문서를 받지 못했습니다. 공식 사이트 접속 문제일 수 있으니 잠시 후 다시 시도해 주세요."
 REFERENCE_TITLE = "참고: 관련될 수 있는 조항 (질문의 답이 아닐 수 있습니다)"
 # 질문을 처리하는 동안 보여줄 진행 단계
 STAGES = {
@@ -31,6 +38,8 @@ STAGES = {
     "search": "1/2 규정을 검색하는 중...",
     "llm": "2/2 검색한 조문으로 답변을 작성하는 중...",
 }
+# Streamlit Secrets의 이 값들을 환경변수로 옮긴다. 로컬에서는 .env를 쓴다 (answer.create_llm)
+SECRET_KEYS = ("LLM_PROVIDER", "GROQ_API_KEY", "GROQ_MODEL", "OPENAI_API_KEY", "OPENAI_MODEL", "HF_TOKEN")
 WARMUP_QUERY = "선수 계약 기간"  # 임베딩 모델의 첫 계산(약 0.7초)을 미리 치른다
 
 # 평가 질문지에서 고른 예시 (조번호 Q01, 표 Q14, 규정에 없는 질문 Q19)
@@ -92,7 +101,7 @@ def reference_label(chunk: dict) -> str:
     """참고 조항 제목. 검색 결과의 메타데이터로만 만든다."""
     pages = ", ".join(str(page) for page in chunk["pages"])
     label = f"{chunk_label(chunk)} · {pages}쪽 · 기준일 {chunk['effective_date']}"
-    notice = enforcement_notice(chunk["enforcement_date"])
+    notice = chunk_notice(chunk)
     return f"{label} · {notice}" if notice else label
 
 
@@ -112,18 +121,70 @@ def load_searcher():
     return searcher
 
 
-def preload() -> None:
-    """화면이 처음 열릴 때 검색기를 미리 만든다. 서버 프로세스에 한 번만 만들어지고 이후 접속은 재사용한다.
+def failed_notice(failed: list[str]) -> str:
+    return f"일부 규정을 불러오지 못했습니다({', '.join(failed)}). 이 규정에 대한 질문에는 답할 수 없습니다."
+
+
+@st.cache_resource
+def prepare_lock() -> threading.Lock:
+    """여러 접속이 동시에 첫 실행 준비를 하지 않도록 서버 프로세스에 하나만 둔다."""
+    return threading.Lock()
+
+
+def prepare(slot) -> bootstrap.Prepared:
+    """청크 파일이 없으면 규정 PDF를 받아 만든다. 진행 단계와 결과 안내는 slot(화면 위쪽)에 쓴다."""
+    if not bootstrap.is_ready():
+        progress = slot.empty()  # 진행 표시는 끝나면 지운다
+        lock = prepare_lock()
+        if lock.locked():
+            progress.info("다른 접속에서 규정 문서를 준비하고 있습니다. 잠시만 기다려 주세요.")
+        with lock:
+            if not bootstrap.is_ready():
+                with progress.status(bootstrap.STEPS["download"]) as status:
+                    bootstrap.prepare_data(on_step=lambda step: status.update(label=bootstrap.STEPS[step]))
+        progress.empty()
+    return bootstrap.read_status()
+
+
+def preload(slot) -> None:
+    """화면이 처음 열릴 때 규정 데이터와 검색기를 미리 만든다. 서버 프로세스에 한 번만 만들어진다.
 
     Streamlit은 브라우저가 접속해야 스크립트를 실행하므로, 서버 시작 직후가 아니라 첫 화면이 열릴 때 만든다.
-    실패해도 화면은 그대로 두고, 질문할 때 get_backend가 오류 안내를 띄운다.
+    검색기를 만들다 실패하면 화면은 그대로 두고, 질문할 때 get_backend가 오류 안내를 띄운다.
     """
     if "searcher" in st.session_state:  # 테스트가 가짜 검색기를 넣은 경우
         return
+    status = prepare(slot)
+    if not status.ok:
+        slot.error(MSG_PREPARE_ERROR)
+        slot.button("다시 시도")  # 누르면 다시 실행되고, 청크 파일이 없으므로 처음부터 다시 받는다
+        return
+    if status.failed:
+        slot.warning(failed_notice(status.failed))
     try:
         load_searcher()
     except Exception:
         pass
+
+
+def apply_secrets() -> None:
+    """Streamlit Secrets의 값을 환경변수가 비어 있을 때만 옮긴다. Secrets가 없으면 아무것도 하지 않는다."""
+    try:
+        secrets = {key: st.secrets[key] for key in SECRET_KEYS if key in st.secrets}
+    except Exception:  # secrets.toml이 없는 로컬 환경
+        return
+    for key, value in secrets.items():
+        if not os.environ.get(key):
+            os.environ[key] = str(value)
+
+
+@st.cache_resource
+def shared_limiter() -> UsageLimiter:
+    return UsageLimiter()
+
+
+def get_limiter() -> UsageLimiter:
+    return st.session_state["limiter"] if "limiter" in st.session_state else shared_limiter()
 
 
 @st.cache_resource
@@ -161,6 +222,10 @@ def submit(question: str) -> None:
     notice = check_question(question, state.get("last_asked_at"), now)
     if notice:
         state["view"] = {"kind": "notice", "message": notice}
+        return
+    limit = get_limiter().acquire()  # 서버 전체 사용량. 세션 제한을 통과한 질문만 센다
+    if limit:
+        state["view"] = {"kind": "notice", "message": limit}
         return
     state["last_asked_at"] = now
     slot = st.empty()  # 진행 표시는 끝나면 지운다
@@ -205,8 +270,11 @@ def render_result(result: dict) -> None:
 
 def main() -> None:
     st.set_page_config(page_title="K리그 규정 챗봇", page_icon="⚽")
+    apply_secrets()
     st.title("K리그 규정 챗봇")
+    st.info(PORTFOLIO_NOTICE)
     st.info(DISCLAIMER)
+    status_slot = st.container()  # 첫 실행 준비 진행과 일부 규정 누락 안내 자리
 
     st.caption("예시 질문")
     for column, (label, question) in zip(st.columns(len(EXAMPLES)), EXAMPLES):
@@ -228,7 +296,7 @@ def main() -> None:
 
     render_view(st.session_state.get("view"))
     # 화면을 먼저 그린 뒤 검색기를 불러온다. 사용자가 질문을 쓰는 동안 준비된다.
-    preload()
+    preload(status_slot)
 
 
 def render_view(view: dict | None) -> None:

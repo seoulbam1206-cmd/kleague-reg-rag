@@ -18,11 +18,13 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent.parent
 CHUNK_DIR = ROOT / "data" / "chunks"
 INDEX_DIR = ROOT / "data" / "index"
+STORED_DIR = ROOT / "index"  # 미리 계산해 저장소에 올리는 벡터. 규정 원문은 담지 않는다
 
 BM25_K1 = 1.5
 BM25_B = 0.75
 RRF_K = 60  # 순위 융합의 표준 상수
-EMBED_BATCH = 16
+EMBED_BATCH = 8  # 한 번에 계산하는 청크 수. 클수록 빠르지만 계산 중 메모리가 커진다
+CPU_MEM_ARENA = False  # ONNX Runtime이 계산용 메모리를 붙잡아 두지 않게 한다 (배포 서버 메모리 한도)
 DEFAULT_MODEL = "intfloat/multilingual-e5-small"  # eval/search_results.md의 비교 결과로 선택
 
 WORD = re.compile(r"[가-힣]+|[A-Za-z]+|\d+(?:[.,]\d+)*")
@@ -257,8 +259,11 @@ class OnnxEncoder:
         self.tokenizer = Tokenizer.from_file(hf_hub_download(model_name, "tokenizer.json"))
         self.tokenizer.enable_truncation(max_length=max_length)
         self.tokenizer.enable_padding()
+        options = onnxruntime.SessionOptions()
+        options.enable_cpu_mem_arena = CPU_MEM_ARENA
         self.session = onnxruntime.InferenceSession(
             hf_hub_download(model_name, "onnx/model.onnx"),
+            sess_options=options,
             providers=["CPUExecutionProvider"],
         )
         self.inputs = {item.name for item in self.session.get_inputs()}
@@ -291,15 +296,55 @@ def load_chunks(name: str = "article", folder: Path = CHUNK_DIR) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
 
+def text_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def stored_file(model: str, name: str = "article", folder: Path = STORED_DIR) -> Path:
+    return folder / f"{name}_{model.replace('/', '_')}.npz"
+
+
+def save_stored(encoder: Encoder, chunks: list[dict], vectors: np.ndarray, path: Path) -> None:
+    """청크 내용의 해시와 벡터만 저장한다. 해시에서 원문을 되살릴 수는 없다."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    hashes = np.array([text_hash(chunk["text"]) for chunk in chunks])
+    np.savez_compressed(path, model=np.array(encoder.name), hashes=hashes, vectors=vectors)
+
+
+def reuse_vectors(encoder: Encoder, chunks: list[dict], path: Path) -> tuple[np.ndarray, int]:
+    """미리 계산한 벡터 중 청크 내용 해시가 같은 것은 그대로 쓰고, 나머지만 새로 계산한다.
+
+    규정이 개정되어 바뀐 청크만 다시 계산하므로 배포 서버의 메모리와 시간을 아낀다.
+    파일이 없거나 다른 모델의 벡터면 전부 계산한다. (벡터, 새로 계산한 청크 수)를 돌려준다.
+    """
+    texts = [chunk["text"] for chunk in chunks]
+    known: dict[str, np.ndarray] = {}
+    if path.exists():
+        with np.load(path, allow_pickle=False) as stored:
+            if str(stored["model"]) == encoder.name:
+                known = dict(zip(stored["hashes"].tolist(), stored["vectors"]))
+    hashes = [text_hash(text) for text in texts]
+    missing = [i for i, h in enumerate(hashes) if h not in known]
+    computed = encoder.encode_passages([texts[i] for i in missing]) if missing else None
+    rows = dict(zip(missing, computed)) if missing else {}
+    return np.vstack([rows[i] if i in rows else known[h] for i, h in enumerate(hashes)]), len(missing)
+
+
 def cached_vectors(encoder: Encoder, chunks: list[dict], name: str,
-                   folder: Path = INDEX_DIR) -> np.ndarray:
-    """임베딩을 파일로 저장해 다시 쓴다. 청크 내용이 바뀌면 파일 이름이 달라져 새로 만든다."""
+                   folder: Path = INDEX_DIR, stored: Path | None = None) -> np.ndarray:
+    """임베딩을 파일로 저장해 다시 쓴다. 청크 내용이 바뀌면 파일 이름이 달라져 새로 만든다.
+
+    stored를 주면 캐시가 없을 때 미리 계산한 벡터를 먼저 쓰고 바뀐 청크만 계산한다.
+    """
     folder.mkdir(parents=True, exist_ok=True)
     texts = [chunk["text"] for chunk in chunks]
     digest = hashlib.sha256("\n".join(texts).encode("utf-8")).hexdigest()[:12]
     path = folder / f"{name}_{encoder.name.replace('/', '_')}_{digest}.npy"
     if path.exists():
         return np.load(path)
-    vectors = encoder.encode_passages(texts)
+    if stored is not None:
+        vectors, _ = reuse_vectors(encoder, chunks, stored)
+    else:
+        vectors = encoder.encode_passages(texts)
     np.save(path, vectors)
     return vectors

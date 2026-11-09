@@ -203,10 +203,11 @@ def extract_pdf(path: Path, manual: dict[tuple[str, int], str] | None = None) ->
     return results
 
 
-def extract_document(entry: dict, pdf_dir: Path = PDF_DIR, manual: dict | None = None) -> dict:
+def extract_document(entry: dict, pdf_dir: Path = PDF_DIR, manual: dict | None = None,
+                     strict: bool = True) -> dict:
     revision = parse_revision(entry["body_text"])
     enforcement = resolve_enforcement(
-        entry["no"], revision["date"], load_enforcement_rules()
+        entry["no"], revision["date"], load_enforcement_rules(), strict=strict
     )
     file_name = entry["files"][0]["file"]
     return {
@@ -219,6 +220,7 @@ def extract_document(entry: dict, pdf_dir: Path = PDF_DIR, manual: dict | None =
         "effective_kind": revision["kind"],
         "enforcement_date": enforcement["date"],
         "enforcement_basis": enforcement["basis"],
+        "enforcement_recheck": enforcement.get("recheck", False),
         "revision_note": entry["body_text"],
         "pages": extract_pdf(pdf_dir / file_name, manual),
     }

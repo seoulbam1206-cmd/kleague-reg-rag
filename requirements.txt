@@ -1,11 +1,12 @@
-requests
-beautifulsoup4
-pytest
-pdfplumber
-numpy
-onnxruntime
-tokenizers
-huggingface_hub
-openai
-python-dotenv
-streamlit
+# 배포(Streamlit Community Cloud, Python 3.12)와 로컬 개발에서 같은 버전을 쓰도록 고정한다
+requests==2.34.2
+beautifulsoup4==4.15.0
+pytest==9.2.0
+pdfplumber==0.11.10
+numpy==2.5.4
+onnxruntime==1.31.1
+tokenizers==0.23.3
+huggingface_hub==2.4.0
+openai==3.46.0
+python-dotenv==1.2.4
+streamlit==1.67.0

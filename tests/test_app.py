@@ -3,6 +3,7 @@
 import time
 from pathlib import Path
 
+import bootstrap
 import pytest
 import streamlit as st
 from streamlit.testing.v1 import AppTest
@@ -65,10 +66,17 @@ class FakeLLM:
         return self.reply
 
 
+def roomy_limiter():
+    """서버 전체 제한은 프로세스에 하나라 테스트끼리 누적된다. 제한을 따로 재는 테스트 밖에서는 넉넉한 것을 쓴다."""
+    from limits import UsageLimiter
+    return UsageLimiter(per_minute=10**6, per_day=10**6)
+
+
 def start(searcher=None, llm=None, last_asked_at=None):
     at = AppTest.from_file(APP, default_timeout=30)
     at.session_state["searcher"] = searcher or FakeSearcher()
     at.session_state["llm"] = llm or FakeLLM()
+    at.session_state["limiter"] = roomy_limiter()
     if last_asked_at is not None:
         at.session_state["last_asked_at"] = last_asked_at
     return at.run()
@@ -390,6 +398,8 @@ def real_loader(monkeypatch):
         return searcher
 
     monkeypatch.setattr(answer, "build_searcher", fake_build)
+    monkeypatch.setattr(bootstrap, "is_ready", lambda *a: True)
+    monkeypatch.setattr(bootstrap, "read_status", lambda *a: bootstrap.Prepared(ok=True))
     st.cache_resource.clear()
     yield made
     st.cache_resource.clear()
@@ -398,6 +408,7 @@ def real_loader(monkeypatch):
 def open_page(llm=None):
     at = AppTest.from_file(APP, default_timeout=30)
     at.session_state["llm"] = llm or FakeLLM()
+    at.session_state["limiter"] = roomy_limiter()
     return at.run()
 
 
@@ -424,6 +435,8 @@ def test_preload_failure_keeps_page_and_shows_error_on_question(monkeypatch):
         raise FileNotFoundError("data/chunks/article.jsonl")
 
     monkeypatch.setattr(answer, "build_searcher", broken)
+    monkeypatch.setattr(bootstrap, "is_ready", lambda *a: True)
+    monkeypatch.setattr(bootstrap, "read_status", lambda *a: bootstrap.Prepared(ok=True))
     st.cache_resource.clear()
     try:
         at = open_page()
@@ -456,3 +469,101 @@ def test_progress_is_cleared_after_answer():
     labels = [e.label for e in at.expander]
     assert not any(label in STAGES.values() for label in labels)
     assert len(at.expander) == 1
+
+
+# 6단계 배포: 안내 문구, 서버 전체 제한, 첫 실행 준비 실패, Secrets
+
+def test_portfolio_notice_is_shown_above_disclaimer():
+    from app import PORTFOLIO_NOTICE
+    at = start()
+    infos = texts(at.info)
+    assert PORTFOLIO_NOTICE == "한국프로축구연맹 공식 서비스가 아닌 개인 포트폴리오 프로젝트입니다. 답변은 공식 해석이 아닙니다."
+    assert infos.index(PORTFOLIO_NOTICE) < infos.index(DISCLAIMER)
+
+
+@pytest.mark.parametrize("per_minute, per_day, message_key", [(0, 100, "MSG_MINUTE"), (100, 0, "MSG_DAY")])
+def test_global_limit_shows_notice_only(per_minute, per_day, message_key):
+    import limits
+    searcher, llm = FakeSearcher(), FakeLLM()
+    at = start(searcher, llm)
+    at.session_state["limiter"] = limits.UsageLimiter(per_minute=per_minute, per_day=per_day)
+    at = ask(at, "질문")
+    assert texts(at.warning) == [getattr(limits, message_key)]
+    assert (searcher.queries, llm.calls) == ([], 0)
+    assert len(at.expander) == 0
+
+
+def test_session_limits_are_checked_before_global_count():
+    from limits import UsageLimiter
+    limiter = UsageLimiter(per_minute=100, per_day=100)
+    at = start()
+    at.session_state["limiter"] = limiter
+    at = ask(at, "가" * (MAX_QUESTION_CHARS + 1))
+    assert texts(at.warning) == [MSG_TOO_LONG]
+    assert limiter.day_count == 0  # 세션 제한에 걸린 질문은 서버 전체 횟수에 넣지 않는다
+
+
+@pytest.fixture
+def not_prepared(monkeypatch):
+    """청크 파일이 없는 배포 첫 실행 상태. 준비 결과는 테스트가 정한다."""
+    state = {"ready": False, "result": bootstrap.Prepared(ok=False, error="규정 문서를 받지 못했습니다")}
+    calls = []
+
+    def prepare_data(on_step=None, **kwargs):
+        calls.append(1)
+        for step in ("download", "extract", "chunk"):
+            on_step(step)
+        state["ready"] = state["result"].ok
+        return state["result"]
+
+    monkeypatch.setattr(bootstrap, "is_ready", lambda *a: state["ready"])
+    monkeypatch.setattr(bootstrap, "prepare_data", prepare_data)
+    monkeypatch.setattr(bootstrap, "read_status", lambda *a: state["result"])
+    st.cache_resource.clear()
+    yield state, calls
+    st.cache_resource.clear()
+
+
+def test_prepare_failure_shows_error_and_retry(not_prepared):
+    from app import MSG_PREPARE_ERROR
+    state, calls = not_prepared
+    at = open_page()
+    assert not at.exception
+    assert texts(at.error) == [MSG_PREPARE_ERROR]
+    assert "다시 시도" in [b.label for b in at.button]
+    retry = next(b for b in at.button if b.label == "다시 시도")
+    retry.click()
+    at.run()
+    assert len(calls) == 2  # 다시 시도하면 처음부터 다시 받는다
+
+
+def test_failed_regulations_are_listed(not_prepared, monkeypatch):
+    import answer
+    state, _ = not_prepared
+    state["result"] = bootstrap.Prepared(ok=True, failed=["K리그 클럽 라이선싱 규정"])
+    monkeypatch.setattr(answer, "build_searcher", FakeSearcher)
+    at = open_page()
+    assert not at.exception
+    assert "일부 규정을 불러오지 못했습니다(K리그 클럽 라이선싱 규정). 이 규정에 대한 질문에는 답할 수 없습니다." in texts(at.warning)
+    assert not texts(at.error)
+
+
+def test_recheck_notice_appears_in_citation_label():
+    searcher = FakeSearcher([{**chunk(), "enforcement_recheck": True}])
+    at = ask(start(searcher), "질문")
+    assert "시행일 재확인 필요" in at.expander[0].label
+
+
+def test_secrets_fill_missing_environment(monkeypatch):
+    monkeypatch.delenv("GROQ_MODEL", raising=False)
+    monkeypatch.setenv("GROQ_API_KEY", "from-env")
+    at = AppTest.from_file(APP, default_timeout=30)
+    at.secrets["GROQ_API_KEY"] = "from-secrets"
+    at.secrets["GROQ_MODEL"] = "secret-model"
+    at.session_state["searcher"] = FakeSearcher()
+    at.session_state["limiter"] = roomy_limiter()
+    at.run()
+    import os
+    assert os.environ["GROQ_MODEL"] == "secret-model"
+    assert os.environ["GROQ_API_KEY"] == "from-env"  # 이미 있는 환경변수는 덮어쓰지 않는다
+    monkeypatch.delenv("GROQ_MODEL")

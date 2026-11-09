@@ -127,7 +127,11 @@ def main() -> int:
         "--verify-hash", action="store_true", help="모든 첨부를 받아 해시로 대조한다"
     )
     args = parser.parse_args()
+    return run(verify_hash=args.verify_hash)
 
+
+def run(verify_hash: bool = False) -> int:
+    """다운로드 본체. 배포 앱의 첫 실행 준비(src/bootstrap.py)에서도 부른다."""
     OUT_DIR.mkdir(exist_ok=True)
     old = {}
     if MANIFEST.exists():
@@ -159,7 +163,7 @@ def main() -> int:
             old_files = old_entry["files"] if old_entry else []
             old_file = old_files[i - 1] if i <= len(old_files) else None
             reason = fetch_reason(old_entry, old_file, body_text, att["url"], dest)
-            if reason is None and args.verify_hash:
+            if reason is None and verify_hash:
                 reason = "해시 검증"
             if reason is None:
                 print(f"[{it['no']:02d}] 건너뜀 (변경 없음): {fname}")

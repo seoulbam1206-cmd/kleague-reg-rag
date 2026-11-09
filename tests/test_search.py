@@ -1,5 +1,7 @@
 """검색 검증. 실제 모델이 필요한 평가는 tests/test_search_eval.py에 있다."""
 
+import zlib
+
 import numpy as np
 import pytest
 
@@ -35,14 +37,17 @@ SAMPLE = [
 
 
 class FakeEncoder:
-    """글자 단위 해시 임베딩. 테스트에서 실제 모델을 대신한다."""
+    """글자 단위 해시 임베딩. 테스트에서 실제 모델을 대신한다.
+
+    파이썬 hash()는 실행마다 값이 바뀌어(PYTHONHASHSEED) 순위가 흔들렸다. 고정된 crc32를 쓴다.
+    """
 
     name = "fake"
 
     def _vector(self, text):
         vector = np.zeros(64)
         for char in text:
-            vector[hash(char) % 64] += 1
+            vector[zlib.crc32(char.encode("utf-8")) % 64] += 1
         return vector / (np.linalg.norm(vector) or 1)
 
     def encode_passages(self, texts):

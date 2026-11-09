@@ -14,8 +14,8 @@ from datetime import date
 from pathlib import Path
 from typing import Callable, Protocol
 
-from enforcement import enforcement_notice
-from search import DEFAULT_MODEL, OnnxEncoder, Searcher, cached_vectors, load_chunks
+from enforcement import chunk_notice
+from search import DEFAULT_MODEL, OnnxEncoder, Searcher, cached_vectors, load_chunks, stored_file
 
 ROOT = Path(__file__).resolve().parent.parent
 ENV_FILE = ROOT / ".env"
@@ -133,7 +133,7 @@ def chunk_label(chunk: dict) -> str:
 def build_user_prompt(question: str, chunks: list[dict], today: date) -> str:
     sources = []
     for number, chunk in enumerate(chunks, 1):
-        notice = enforcement_notice(chunk["enforcement_date"], today)
+        notice = chunk_notice(chunk, today)
         status = f" | {notice}" if notice else ""
         sources.append(
             f"[{number}] {chunk_label(chunk)} | 기준일 {chunk['effective_date']} | "
@@ -177,7 +177,7 @@ def citation_entry(number: int, chunk: dict, today: date) -> dict:
         "pages": chunk["pages"],
         "effective_date": chunk["effective_date"],
         "enforcement_date": chunk["enforcement_date"],
-        "notice": enforcement_notice(chunk["enforcement_date"], today),
+        "notice": chunk_notice(chunk, today),
     }
 
 
@@ -267,7 +267,8 @@ def answer_question(question: str, searcher: Searcher, llm: LLM, today: date | N
 def build_searcher(model: str = DEFAULT_MODEL) -> Searcher:
     chunks = load_chunks("article")
     encoder = OnnxEncoder(model)
-    return Searcher(chunks, encoder=encoder, vectors=cached_vectors(encoder, chunks, "article"))
+    vectors = cached_vectors(encoder, chunks, "article", stored=stored_file(model))
+    return Searcher(chunks, encoder=encoder, vectors=vectors)
 
 
 def main() -> int:

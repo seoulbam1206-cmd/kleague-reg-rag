@@ -303,6 +303,8 @@ def segment_chunks(doc: dict, segment: dict) -> list[dict]:
             "effective_kind": doc["effective_kind"],
             "enforcement_date": doc["enforcement_date"],
             "visibility": "public",  # 외부 API 전송 허용 표시. 비공개 문서에는 쓰지 않는다
+            # 개정으로 시행일을 다시 확인해야 하는 규정만 표시한다 (기존 청크 내용은 그대로)
+            **({"enforcement_recheck": True} if doc.get("enforcement_recheck") else {}),
             "pages": sorted({page for page, _ in unit}),
             "body": body,
             "text": "\n".join([label, *header, body]),
@@ -379,6 +381,7 @@ def fixed_chunks(doc: dict, size: int = FIXED_SIZE, overlap: int = FIXED_OVERLAP
             "effective_kind": doc["effective_kind"],
             "enforcement_date": doc["enforcement_date"],
             "visibility": "public",  # 외부 API 전송 허용 표시. 비공개 문서에는 쓰지 않는다
+            **({"enforcement_recheck": True} if doc.get("enforcement_recheck") else {}),
             "pages": [p for s, e, p in spans if s < end and e > start],
             "body": body,
             "text": f"[{doc['title']}]\n{body}",
