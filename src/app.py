@@ -1,4 +1,4 @@
-"""K리그 규정 챗봇 화면.
+"""K리그 규정 질의응답(Q&A) 서비스 화면.
 
     streamlit run src/app.py
 
@@ -403,9 +403,9 @@ def render_result(result: dict) -> None:
 
 
 def main() -> None:
-    st.set_page_config(page_title="K리그 규정 챗봇", page_icon="⚽")
+    st.set_page_config(page_title="K리그 규정 질의응답(Q&A) 서비스", page_icon="⚽")
     apply_secrets()
-    st.title("K리그 규정 챗봇")
+    st.title("K리그 규정 질의응답(Q&A) 서비스")
     st.info(PORTFOLIO_NOTICE)
     st.info(DISCLAIMER)
     status_slot = st.container()  # 첫 실행 준비 진행과 일부 규정 누락 안내 자리
