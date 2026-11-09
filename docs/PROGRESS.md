@@ -392,7 +392,7 @@
 ### 6단계 진행: 5번 히스토리 수정 (push 전)
 - 백업: `D:/myproject/kleague-reg-rag-backup/before-history-rewrite-20261109.bundle` (전체 ref, verify 통과)
 - `git filter-repo` 2.47.0 (가상환경에 설치, requirements에는 넣지 않음)로 커밋 17개 수정
-  - 작성자·커미터 이메일 → noreply 주소. 이름 `seoulbam`은 그대로
+  - 작성자·커미터 이메일 → noreply 주소. 작성자 이름은 이때는 그대로 두었고, 뒤의 "실명 제거"에서 `seoulbam`으로 바꿈
   - 파일 내용과 커밋 메시지의 이전 표현(8곳, 메시지 1곳) → "비공개 문서"
 - 확인: 모든 커밋이 noreply, 히스토리 전체에 이전 표현 0건, 커밋 수 17개 그대로, 마지막 커밋 트리가 백업과 같음, 전체 테스트 364개 통과
 - 커밋 해시가 모두 바뀜 (예: README 커밋 e75cbf7 → d65a3a2)
@@ -483,3 +483,7 @@
 - 현재 파일 검색: 실명 0건
 - 히스토리 검색: 이미 푸시된 커밋 2개의 LICENSE에만 남음. 커밋 메시지·작성자 정보에는 없음
 - CLAUDE.md 보안 규칙에 "작성자 실명을 저장소에 쓰지 않는다" 추가, LICENSE 저작권자 표기 테스트 추가
+- 백업 후 히스토리 수정 (`kleague-reg-rag-backup/before-name-removal-20261109.bundle`): 실명 → `seoulbam`. 웹에서 만든 LICENSE 커밋은 바꿀 내용이 없어져 빈 커밋으로 빠짐
+- 사용자 결정: 이전 작성자 이름(이니셜로 읽힐 수 있음)도 `seoulbam`으로. 백업(`before-author-rename-20261109.bundle`) 후 모든 커밋의 작성자·커미터 이름과 기록 속 표기를 바꿈. 이 저장소의 git `user.name`도 `seoulbam`
+- 백업 번들 3개에는 실명·이전 이메일·이전 이름이 남아 있으므로 로컬에만 둔다
+- GitHub는 force push 뒤에도 이전 커밋을 해시 주소로 한동안 보여줄 수 있다. 완전히 지우려면 GitHub Support에 요청
