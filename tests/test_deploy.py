@@ -435,3 +435,10 @@ def test_searcher_cache_is_keyed_by_data_version():
     assert "version" in inspect.signature(app.load_searcher).parameters
     source = inspect.getsource(app)
     assert source.count("load_searcher(bootstrap.data_version())") == 2
+
+
+def test_license_holder_uses_public_handle():
+    """작성자 실명을 공개하지 않는다. 저작권자는 GitHub에서 쓰는 표기와 같게 둔다 (사용자 결정 2026-11-09)."""
+    lines = (ROOT / "LICENSE").read_text(encoding="utf-8").splitlines()
+    assert "Copyright (c) 2026 seoulbam" in lines
+    assert "seoulbam" in (ROOT / "CLAUDE.md").read_text(encoding="utf-8")
