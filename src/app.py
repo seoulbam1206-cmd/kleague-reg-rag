@@ -25,6 +25,13 @@ MSG_LOAD_ERROR = "검색 데이터를 불러오지 못했습니다. 관리자에
 MSG_CONFIG_ERROR = "LLM 설정이 없어 답변할 수 없습니다. 관리자에게 문의해 주세요."
 MSG_LLM_ERROR = "답변을 만드는 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
 REFERENCE_TITLE = "참고: 관련될 수 있는 조항 (질문의 답이 아닐 수 있습니다)"
+# 질문을 처리하는 동안 보여줄 진행 단계
+STAGES = {
+    "load": "검색 데이터를 불러오는 중...",
+    "search": "1/2 규정을 검색하는 중...",
+    "llm": "2/2 검색한 조문으로 답변을 작성하는 중...",
+}
+WARMUP_QUERY = "선수 계약 기간"  # 임베딩 모델의 첫 계산(약 0.7초)을 미리 치른다
 
 # 평가 질문지에서 고른 예시 (조번호 Q01, 표 Q14, 규정에 없는 질문 Q19)
 EXAMPLES = [
@@ -100,7 +107,23 @@ def citation_label(item: dict) -> str:
 
 @st.cache_resource(show_spinner="검색 데이터를 불러오는 중...")
 def load_searcher():
-    return build_searcher()
+    searcher = build_searcher()
+    searcher.search(WARMUP_QUERY, k=1)
+    return searcher
+
+
+def preload() -> None:
+    """화면이 처음 열릴 때 검색기를 미리 만든다. 서버 프로세스에 한 번만 만들어지고 이후 접속은 재사용한다.
+
+    Streamlit은 브라우저가 접속해야 스크립트를 실행하므로, 서버 시작 직후가 아니라 첫 화면이 열릴 때 만든다.
+    실패해도 화면은 그대로 두고, 질문할 때 get_backend가 오류 안내를 띄운다.
+    """
+    if "searcher" in st.session_state:  # 테스트가 가짜 검색기를 넣은 경우
+        return
+    try:
+        load_searcher()
+    except Exception:
+        pass
 
 
 @st.cache_resource
@@ -115,16 +138,18 @@ def get_backend():
     return searcher, llm
 
 
-def ask(question: str) -> dict:
+def ask(question: str, on_stage=None) -> dict:
     """화면에 보여줄 상태를 돌려준다. kind는 notice, error, result 중 하나다."""
     try:
+        if on_stage:
+            on_stage("load")
         searcher, llm = get_backend()
     except MissingConfigError:
         return {"kind": "error", "message": MSG_CONFIG_ERROR}
     except Exception:
         return {"kind": "error", "message": MSG_LOAD_ERROR}
     try:
-        result = answer_question(question, searcher, llm)
+        result = answer_question(question, searcher, llm, on_stage=on_stage)
     except Exception:
         return {"kind": "error", "message": MSG_LLM_ERROR}
     return {"kind": "result", "result": result}
@@ -138,8 +163,10 @@ def submit(question: str) -> None:
         state["view"] = {"kind": "notice", "message": notice}
         return
     state["last_asked_at"] = now
-    with st.spinner("규정을 찾아 답변을 만드는 중..."):
-        state["view"] = ask(question)
+    slot = st.empty()  # 진행 표시는 끝나면 지운다
+    with slot.status(STAGES["search"]) as status:
+        state["view"] = ask(question, on_stage=lambda stage: status.update(label=STAGES[stage]))
+    slot.empty()
 
 
 def use_example(question: str) -> None:
@@ -199,7 +226,12 @@ def main() -> None:
     elif pending:
         submit(pending)
 
-    view = st.session_state.get("view")
+    render_view(st.session_state.get("view"))
+    # 화면을 먼저 그린 뒤 검색기를 불러온다. 사용자가 질문을 쓰는 동안 준비된다.
+    preload()
+
+
+def render_view(view: dict | None) -> None:
     if not view:
         return
     if view["kind"] == "notice":

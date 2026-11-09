@@ -642,3 +642,20 @@ def test_review_report_shows_downgrade_reason():
     assert "- 찾을 수 없음 사유: 결론 표지어로 낮춤: 따라서" in report
     assert "- 화면 참고 목록: 선수 규정 제1조 계약기간 ① / 선수 규정 제2조 계약기간 ①" in report
     assert reply in report
+
+
+# 진행 단계 알림
+
+def test_on_stage_reports_search_then_llm():
+    stages = []
+    ask_with = answer_question("계약 기간은?", Searcher([chunk()]), FakeLLM(), today=TODAY,
+                               mode="keyword", on_stage=stages.append)
+    assert ask_with["not_found"] is False
+    assert stages == ["search", "llm"]
+
+
+def test_on_stage_stops_at_search_without_results():
+    stages = []
+    answer_question("zzzz", Searcher([chunk()]), FakeLLM(), today=TODAY, mode="keyword",
+                    on_stage=stages.append)
+    assert stages == ["search"]

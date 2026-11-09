@@ -12,7 +12,7 @@ import re
 import sys
 from datetime import date
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol
 
 from enforcement import enforcement_notice
 from search import DEFAULT_MODEL, OnnxEncoder, Searcher, cached_vectors, load_chunks
@@ -230,12 +230,18 @@ def not_found_result(chunks: list[dict], reason: str = "검색 결과 없음", r
 
 
 def answer_question(question: str, searcher: Searcher, llm: LLM, today: date | None = None,
-                    mode: str = "hybrid", k: int = TOP_K) -> dict:
+                    mode: str = "hybrid", k: int = TOP_K,
+                    on_stage: Callable[[str], None] | None = None) -> dict:
+    """on_stage는 단계가 바뀔 때 "search", "llm"으로 불린다. 화면의 진행 표시에 쓴다."""
     today = today or date.today()
+    if on_stage:
+        on_stage("search")
     chunks = searcher.search(question, k=k, mode=mode)
     if not chunks:
         return not_found_result(chunks)
     ensure_sendable(chunks, llm)
+    if on_stage:
+        on_stage("llm")
     raw = llm.complete(SYSTEM_PROMPT, build_user_prompt(question, chunks, today)).strip()
     normalized = normalize_citations(raw)
     numbers = cited_numbers(normalized, len(chunks))

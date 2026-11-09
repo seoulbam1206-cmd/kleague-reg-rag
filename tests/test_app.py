@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 
 import pytest
+import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 from answer import NO_CITATION, NOT_FOUND
@@ -368,3 +369,90 @@ def test_conclusion_marker_answer_shows_references_only():
     assert REFERENCE_TITLE in headings and "근거 조문" not in headings
     shown = texts(at.markdown) + texts(at.info) + [e.label for e in at.expander]
     assert not any("기다려야" in t for t in shown)
+
+
+# 속도 개선: 검색기 미리 로드, 진행 단계 표시
+
+@pytest.fixture
+def real_loader(monkeypatch):
+    """검색기를 주입하지 않고 app.load_searcher가 build_searcher를 부르게 한다. 캐시는 테스트마다 비운다.
+
+    AppTest가 실행한 스크립트의 함수는 테스트에서 import한 app.load_searcher와 캐시 키가 달라
+    load_searcher.clear()로는 지워지지 않는다. 그래서 캐시 전체를 비운다.
+    """
+    import answer
+
+    made = []
+
+    def fake_build():
+        searcher = FakeSearcher()
+        made.append(searcher)
+        return searcher
+
+    monkeypatch.setattr(answer, "build_searcher", fake_build)
+    st.cache_resource.clear()
+    yield made
+    st.cache_resource.clear()
+
+
+def open_page(llm=None):
+    at = AppTest.from_file(APP, default_timeout=30)
+    at.session_state["llm"] = llm or FakeLLM()
+    return at.run()
+
+
+def test_page_open_preloads_and_warms_up_searcher(real_loader):
+    at = open_page()
+    assert not at.exception
+    assert len(real_loader) == 1
+    from app import WARMUP_QUERY
+    assert real_loader[0].queries == [WARMUP_QUERY]  # 임베딩 첫 계산을 미리 치른다
+
+
+def test_preloaded_searcher_is_reused_for_question(real_loader):
+    at = open_page()
+    at = ask(at, "계약 기간은?")
+    assert len(real_loader) == 1
+    assert real_loader[0].queries[-1] == "계약 기간은?"
+    assert len(at.expander) == 1
+
+
+def test_preload_failure_keeps_page_and_shows_error_on_question(monkeypatch):
+    import answer
+
+    def broken():
+        raise FileNotFoundError("data/chunks/article.jsonl")
+
+    monkeypatch.setattr(answer, "build_searcher", broken)
+    st.cache_resource.clear()
+    try:
+        at = open_page()
+        assert not at.exception
+        assert not texts(at.error)  # 질문 전에는 오류를 띄우지 않는다
+        at = ask(at, "질문")
+        assert texts(at.error) == [MSG_LOAD_ERROR]
+    finally:
+        st.cache_resource.clear()
+
+
+def test_injected_searcher_skips_preload(real_loader):
+    start()
+    assert real_loader == []
+
+
+def test_ask_reports_stages_in_order(monkeypatch):
+    import app
+    monkeypatch.setattr(app, "get_backend", lambda: (FakeSearcher(), FakeLLM()))
+    stages = []
+    view = app.ask("계약 기간은?", on_stage=stages.append)
+    assert view["kind"] == "result"
+    assert stages == ["load", "search", "llm"]
+    assert set(stages) <= set(app.STAGES)
+
+
+def test_progress_is_cleared_after_answer():
+    from app import STAGES
+    at = ask(start(), "계약 기간은?")
+    labels = [e.label for e in at.expander]
+    assert not any(label in STAGES.values() for label in labels)
+    assert len(at.expander) == 1
