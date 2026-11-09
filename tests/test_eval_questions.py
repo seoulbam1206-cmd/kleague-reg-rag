@@ -46,8 +46,8 @@ def test_columns():
 
 def test_question_mix():
     rows = load_rows()
-    assert len(rows) == 31
-    assert len({r["번호"] for r in rows}) == 31
+    assert len(rows) == 32
+    assert len({r["번호"] for r in rows}) == 32
     counts = Counter(r["유형"] for r in rows)
     assert counts["없음"] == 2
     assert min(counts["조번호"], counts["내용"], counts["표"]) >= 3

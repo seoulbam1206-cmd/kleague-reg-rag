@@ -11,7 +11,8 @@ import time
 
 import streamlit as st
 
-from answer import MissingConfigError, answer_question, build_searcher, create_llm
+from answer import MissingConfigError, answer_question, build_searcher, chunk_label, create_llm
+from enforcement import enforcement_notice
 
 MAX_QUESTION_CHARS = 500
 MIN_INTERVAL_SECONDS = 5
@@ -23,6 +24,7 @@ MSG_TOO_FAST = f"질문은 {MIN_INTERVAL_SECONDS}초에 한 번씩 할 수 있�
 MSG_LOAD_ERROR = "검색 데이터를 불러오지 못했습니다. 관리자에게 문의해 주세요."
 MSG_CONFIG_ERROR = "LLM 설정이 없어 답변할 수 없습니다. 관리자에게 문의해 주세요."
 MSG_LLM_ERROR = "답변을 만드는 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
+REFERENCE_TITLE = "참고: 관련될 수 있는 조항 (질문의 답이 아닐 수 있습니다)"
 
 # 평가 질문지에서 고른 예시 (조번호 Q01, 표 Q14, 규정에 없는 질문 Q19)
 EXAMPLES = [
@@ -77,6 +79,14 @@ def source_markdown(body: str) -> str:
             lines.append(MARKDOWN_SPECIAL.sub(r"\\\1", line))
     flush()
     return "\n\n".join(blocks)
+
+
+def reference_label(chunk: dict) -> str:
+    """참고 조항 제목. 검색 결과의 메타데이터로만 만든다."""
+    pages = ", ".join(str(page) for page in chunk["pages"])
+    label = f"{chunk_label(chunk)} · {pages}쪽 · 기준일 {chunk['effective_date']}"
+    notice = enforcement_notice(chunk["enforcement_date"])
+    return f"{label} · {notice}" if notice else label
 
 
 def citation_label(item: dict) -> str:
@@ -137,9 +147,20 @@ def use_example(question: str) -> None:
     st.session_state["pending"] = question
 
 
+def render_references(chunks: list[dict]) -> None:
+    """LLM 답변 없이 검색 상위 조항만 보여준다. 답이 아닐 수 있으므로 모두 접어 둔다."""
+    if not chunks:
+        return
+    st.subheader(REFERENCE_TITLE)
+    for chunk in chunks:
+        with st.expander(reference_label(chunk), expanded=False):
+            st.markdown(source_markdown(chunk["body"]))
+
+
 def render_result(result: dict) -> None:
     if result["not_found"]:
         st.info(result["answer"])
+        render_references(result.get("references", []))
         return
     st.subheader("답변")
     st.markdown(escape_answer(result["answer"]))

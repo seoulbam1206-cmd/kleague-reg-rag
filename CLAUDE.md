@@ -28,7 +28,7 @@ K리그 규정 문서에 근거해 조문을 인용하며 답하는 RAG 챗봇.
 - 시행일 규칙은 `docs_public/manual/enforcement.json`에 있다. 시행일이 오늘 이후면 답변에 `시행 전 (YYYY-MM-DD 시행 예정)`을 표시한다.
 
 ## 평가 규칙
-- 답변 평가는 평소 10문항을 1회 실행한다.
+- 답변 평가는 평소 11문항을 1회 실행한다.
 - 1회 결과에서 이전과 판정이 달라진 문항만 3회 추가 실행해 판단한다. 같은 지시문에서도 실행마다 답이 달라지므로 1회 차이로 결론 내지 않는다.
 - 추가 실행 결과는 `eval/answer_results_repeat.md`에 저장되고 1회 결과(`eval/answer_results.md`)를 덮어쓰지 않는다.
 - `.env`가 필요하므로 실행은 사용자가 한다.
@@ -44,6 +44,7 @@ K리그 규정 문서에 근거해 조문을 인용하며 답하는 RAG 챗봇.
 .venv/Scripts/python src/chunk.py                         # 청킹 (data/chunks)
 .venv/Scripts/python scripts/eval_search.py --model intfloat/multilingual-e5-small  # 검색 평가
 .venv/Scripts/python src/answer.py "질문"                  # 질문하기 (.env 필요)
-.venv/Scripts/python scripts/eval_answer.py               # 답변 평가 10문항 (.env 필요)
+.venv/Scripts/python scripts/eval_answer.py               # 답변 평가 11문항 (.env 필요)
 .venv/Scripts/python scripts/eval_answer.py --repeat 3 --only Q07,Q30  # 판정이 달라진 문항만 3회 (.env 필요)
+.venv/Scripts/python scripts/measure_latency.py          # 질문 1개 응답 시간 측정 (.env 필요)
 ```

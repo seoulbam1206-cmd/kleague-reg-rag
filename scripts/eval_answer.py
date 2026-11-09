@@ -1,11 +1,12 @@
-"""평가 질문 10개를 실제 LLM으로 돌려 eval/answer_results.md에 저장한다. 사람이 읽고 확인한다.
+"""평가 질문 11개를 실제 LLM으로 돌려 eval/answer_results.md에 저장한다. 사람이 읽고 확인한다.
 
-    python scripts/eval_answer.py                          # 10문항 1회
+    python scripts/eval_answer.py                          # 11문항 1회
     python scripts/eval_answer.py --repeat 3 --only Q07,Q30  # 지정 문항만 3회
 
 --only나 --repeat를 쓰면 1회 결과를 덮어쓰지 않도록 eval/answer_results_repeat.md에 저장한다.
 
 문항은 결과를 보기 전에 정했다. 유형별 대표 문항과, 앞 단계에서 위험하다고 표시한 문항이다.
+Q32는 화면에서 사용자가 질문한 사례로, 직접 규정이 없을 때의 참고 조항 표시를 확인하려고 추가했다.
 규정 내용 일부가 .env의 LLM_PROVIDER 서버로 전송되므로 공개 규정 청크만 쓴다.
 """
 
@@ -18,7 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from answer import answer_question, build_searcher, create_llm  # noqa: E402
+from answer import answer_question, build_searcher, chunk_label, create_llm  # noqa: E402
 
 QUESTIONS = ROOT / "eval" / "questions.csv"
 RESULTS = ROOT / "eval" / "answer_results.md"
@@ -34,6 +35,7 @@ REVIEW_SET = {
     "Q20": "규정에 없는 내용",
     "Q30": "규정 간 비교",
     "Q31": "규정명 없는 비교: 검색이 놓치는 문항",
+    "Q32": "상황 적용: 직접 규정이 없을 때 찾을 수 없음으로 답하고, 화면 참고 목록에 관련 조항이 나오는지",
 }
 
 
@@ -94,8 +96,10 @@ def render(rows: list[tuple[dict, dict]], model: str = "") -> str:
             "",
         ]
         if result["not_found"]:
+            references = result.get("references", [])
             lines += [
                 f"- 찾을 수 없음 사유: {result.get('reason', '')}",
+                "- 화면 참고 목록: " + (" / ".join(chunk_label(c) for c in references) or "없음"),
                 "- LLM 원문:",
                 "",
                 "```",

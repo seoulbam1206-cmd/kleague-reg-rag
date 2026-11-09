@@ -170,9 +170,13 @@ def test_no_search_result_shows_not_found():
 
 
 def test_llm_not_found_answer_shows_not_found():
+    from app import REFERENCE_TITLE
     at = ask(start(llm=FakeLLM(NOT_FOUND)), "주차 요금은?")
     assert NOT_FOUND in texts(at.info)
-    assert len(at.expander) == 0
+    # 검색 결과 1건이 참고 조항으로 나온다. 답변의 근거 조문으로 보이면 안 된다 (사용자 승인 후 0 → 1)
+    assert len(at.expander) == 1
+    headings = [h.value for h in at.subheader]
+    assert REFERENCE_TITLE in headings and "근거 조문" not in headings
 
 
 def test_answer_without_citation_is_not_shown():
@@ -237,7 +241,10 @@ def test_too_long_question_shows_notice_only():
 
 def test_question_within_interval_shows_notice_only():
     searcher, llm = FakeSearcher(), FakeLLM()
-    at = ask(start(searcher, llm, last_asked_at=time.monotonic()), "질문")
+    at = start(searcher, llm)
+    # 화면 첫 실행이 느려도 5초가 지나지 않도록, 시각은 화면을 띄운 뒤 질문 직전에 정한다
+    at.session_state["last_asked_at"] = time.monotonic()
+    at = ask(at, "질문")
     assert not at.exception
     assert texts(at.warning) == [MSG_TOO_FAST]
     assert len(at.expander) == 0
@@ -256,7 +263,8 @@ def test_second_question_right_away_is_blocked():
 
 def test_example_button_is_also_rate_limited():
     llm = FakeLLM()
-    at = start(llm=llm, last_asked_at=time.monotonic())
+    at = start(llm=llm)
+    at.session_state["last_asked_at"] = time.monotonic()
     at.button[1].click()
     at.run()
     assert texts(at.warning) == [MSG_TOO_FAST]
@@ -271,8 +279,10 @@ def test_question_after_interval_is_answered():
 
 
 def test_blocked_question_does_not_reset_timer():
+    at = start()
     first = time.monotonic() - 1
-    at = ask(start(last_asked_at=first), "질문")
+    at.session_state["last_asked_at"] = first
+    at = ask(at, "질문")
     assert texts(at.warning) == [MSG_TOO_FAST]
     assert at.session_state["last_asked_at"] == first
 
@@ -304,3 +314,57 @@ def test_source_markdown_renders_tables():
 def test_escape_answer_blocks_strikethrough_and_math():
     assert escape_answer("5~10년, $5") == r"5\~10년, \$5"
     assert escape_answer("**굵게** [1]") == "**굵게** [1]"
+
+
+
+# 참고 조항
+
+def test_llm_not_found_shows_reference_list_collapsed():
+    from app import REFERENCE_TITLE
+    chunks = [chunk(article_no=f"제{i}조", body=f"원문 {i}") for i in range(1, 6)]
+    at = ask(start(FakeSearcher(chunks), FakeLLM(NOT_FOUND)), "구급차가 빠지면?")
+    assert not at.exception
+    assert NOT_FOUND in texts(at.info)
+    assert REFERENCE_TITLE in [h.value for h in at.subheader]
+    assert [e.label.split(" · ")[0] for e in at.expander] == [
+        "선수 규정 제1조 계약기간 ①", "선수 규정 제2조 계약기간 ①", "선수 규정 제3조 계약기간 ①"]
+    assert all(e.proto.expanded is False for e in at.expander)
+    assert any("원문 1" in m for m in texts(at.expander[0].markdown))
+
+
+def test_reference_label_shows_not_yet_enforced():
+    at = ask(start(FakeSearcher([chunk(enforcement="2099-01-01")]), FakeLLM(NOT_FOUND)), "질문")
+    assert "시행 전 (2099-01-01 시행 예정)" in at.expander[0].label
+    assert "3쪽" in at.expander[0].label and "기준일 2026-01-16" in at.expander[0].label
+
+
+def test_reference_list_has_no_llm_text():
+    reply = f"{NOT_FOUND} 따라서 대기해야 합니다."
+    at = ask(start(llm=FakeLLM(reply)), "질문")
+    shown = texts(at.markdown) + texts(at.info) + [e.label for e in at.expander]
+    assert not any("대기해야" in t for t in shown)
+
+
+def test_no_search_result_has_no_reference_list():
+    from app import REFERENCE_TITLE
+    at = ask(start(FakeSearcher([]), FakeLLM()), "질문")
+    assert REFERENCE_TITLE not in [h.value for h in at.subheader]
+    assert len(at.expander) == 0
+
+
+def test_unverified_answer_has_no_reference_list():
+    at = ask(start(llm=FakeLLM("근거 없는 답입니다.")), "질문")
+    assert NO_CITATION in texts(at.info)
+    assert len(at.expander) == 0
+
+
+def test_conclusion_marker_answer_shows_references_only():
+    from app import REFERENCE_TITLE
+    reply = "구급차 2대를 대기시켜야 합니다 [1]. 따라서 기다려야 합니다."
+    at = ask(start(llm=FakeLLM(reply)), "질문")
+    assert not at.exception
+    assert NOT_FOUND in texts(at.info)
+    headings = [h.value for h in at.subheader]
+    assert REFERENCE_TITLE in headings and "근거 조문" not in headings
+    shown = texts(at.markdown) + texts(at.info) + [e.label for e in at.expander]
+    assert not any("기다려야" in t for t in shown)

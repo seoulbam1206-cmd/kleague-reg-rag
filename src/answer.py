@@ -37,6 +37,13 @@ NOT_FOUND = "규정에서 찾을 수 없습니다."
 NO_CITATION = "답변의 근거를 확인하지 못했습니다. 다시 질문해 주세요."
 REASON_EMPTY = "빈 응답"
 REASON_NO_CITATION = "유효한 인용 번호 없음"
+REASON_LLM_NOT_FOUND = "LLM이 찾을 수 없다고 답함"
+# LLM이 찾을 수 없다고 답해도 검색 결과가 있으면 화면에 참고 조항으로 보여준다. LLM 문장은 넣지 않는다.
+REFERENCE_COUNT = 3
+# 근거에서 결론을 추론할 때 쓰는 말. 일반 답변에 있으면 내보내지 않고 찾을 수 없음 + 참고 목록으로 낮춘다.
+# 지시문으로 해석을 금지해도 지켜지지 않은 사례(Q32) 때문에 코드로 막는다. 다른 표현의 결론은 막지 못한다.
+CONCLUSION_MARKERS = ("따라서", "그러므로")
+REASON_CONCLUSION = "결론 표지어로 낮춤"
 TOP_K = 5
 CITATION = re.compile(r"\[(\d{1,2})\]")
 # 모델에 따라 【1】, ［1］, 【1†source】, 【1, 4】처럼 쓴다. [1] 형식으로 통일한다.
@@ -48,7 +55,7 @@ SYSTEM_PROMPT = f"""당신은 K리그 규정을 안내하는 도우미입니다.
 규칙:
 1. 제공된 [근거]에 있는 내용만으로 답합니다. 일반 지식이나 추측을 쓰지 않습니다.
 2. 문장마다 해당 근거 번호를 [1]처럼 표시합니다.
-3. 근거에 답이 없으면 다른 말 없이 "{NOT_FOUND}"라고만 답합니다.
+3. 근거에 답이 없으면 다른 말 없이 "{NOT_FOUND}"라고만 답합니다. 질문이 가정한 상황이 근거에 직접 나와 있지 않으면, 관련된 조항이 있어도 그 조항으로 결론을 추론하지 말고 "{NOT_FOUND}"라고만 답합니다.
 4. 표는 행과 열을 맞춰 정확히 읽습니다.
 5. 숫자, 금액, 기간, 날짜는 원문 표현 그대로 씁니다. 예를 들어 "12월 말일"을 "12월 31일"로 바꾸지 않습니다.
 6. 조건, 예외, 단서 조항(다만, 단, ~는 제외 등)이 근거에 있으면 빠뜨리지 않습니다. 답으로 쓴 문장에 "단,"이나 "다만,"으로 시작하는 문장이 이어지면 함께 쓰고, 수치에 붙은 조건(~를 포함하여 등)도 함께 씁니다.
@@ -197,14 +204,29 @@ def not_found_reason(raw: str) -> str:
     if not raw:
         return REASON_EMPTY
     if NOT_FOUND in raw:
-        return "LLM이 찾을 수 없다고 답함"
+        return REASON_LLM_NOT_FOUND
     return REASON_NO_CITATION
+
+
+def reference_chunks(chunks: list[dict], count: int = REFERENCE_COUNT) -> list[dict]:
+    """검색 순위대로 조문이 겹치지 않게 고른다. 같은 조의 다른 청크는 한 번만 보여준다."""
+    picked, seen = [], set()
+    for chunk in chunks:
+        key = (chunk["regulation"], chunk.get("article_no", ""))
+        if key not in seen:
+            seen.add(key)
+            picked.append(chunk)
+        if len(picked) == count:
+            break
+    return picked
 
 
 def not_found_result(chunks: list[dict], reason: str = "검색 결과 없음", raw: str = "") -> dict:
     message = NO_CITATION if reason in (REASON_EMPTY, REASON_NO_CITATION) else NOT_FOUND
+    # 참고 조항은 LLM이 찾을 수 없다고 답했거나 결론 표지어로 낮춘 경우에만 둔다. 검색 결과가 없으면 비어 있다.
+    references = reference_chunks(chunks) if reason.startswith((REASON_LLM_NOT_FOUND, REASON_CONCLUSION)) else []
     return {"answer": message, "text": message, "citations": [], "not_found": True,
-            "retrieved": chunks, "reason": reason, "raw": raw}
+            "references": references, "retrieved": chunks, "reason": reason, "raw": raw}
 
 
 def answer_question(question: str, searcher: Searcher, llm: LLM, today: date | None = None,
@@ -220,12 +242,16 @@ def answer_question(question: str, searcher: Searcher, llm: LLM, today: date | N
     if not numbers:  # 찾을 수 없다는 답이거나 근거 없는 답변이다
         return not_found_result(chunks, not_found_reason(raw), raw)
     body = drop_invalid_citations(normalized, len(chunks))
+    markers = [marker for marker in CONCLUSION_MARKERS if marker in body]
+    if markers:  # 근거에서 결론을 지어냈을 수 있으므로 답변 대신 조항 원문만 보여준다
+        return not_found_result(chunks, f"{REASON_CONCLUSION}: {', '.join(markers)}", raw)
     citations = [citation_entry(n, chunks[n - 1], today) for n in numbers]
     return {
         "answer": body,
         "text": format_answer(body, citations),
         "citations": citations,
         "not_found": False,
+        "references": [],
         "retrieved": chunks,
         "reason": "",
         "raw": raw,

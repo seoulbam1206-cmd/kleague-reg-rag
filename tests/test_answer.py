@@ -10,7 +10,10 @@ import pytest
 
 from answer import (
     NO_CITATION,
+    CONCLUSION_MARKERS,
     NOT_FOUND,
+    REASON_CONCLUSION,
+    REFERENCE_COUNT,
     SYSTEM_PROMPT,
     ConfidentialDataError,
     MissingConfigError,
@@ -389,7 +392,7 @@ def test_env_example_lists_settings_without_values():
 
 
 def test_review_set_has_ten_questions():
-    assert len(load_review_questions()) == 10 == len(REVIEW_SET)
+    assert len(load_review_questions()) == 11 == len(REVIEW_SET)
 
 
 def test_run_asks_every_question():
@@ -413,7 +416,7 @@ def test_only_and_repeat_select_questions_grouped():
 @pytest.mark.parametrize(
     "argv",
     [
-        ["--only", "Q02"],  # 평가 대상 10문항이 아니다
+        ["--only", "Q02"],  # 평가 대상 11문항이 아니다
         ["--only", "Q07,Q99"],
         ["--only", ","],
         ["--repeat", "0"],
@@ -453,7 +456,7 @@ def eval_files(tmp_path, monkeypatch):
 def test_default_run_writes_main_results(eval_files):
     llm, results, repeat = eval_files
     assert eval_answer.main([]) == 0
-    assert len(llm.calls) == 10
+    assert len(llm.calls) == 11
     assert results.exists() and not repeat.exists()
 
 
@@ -533,3 +536,109 @@ def test_notice_disappears_after_enforcement_on_real_chunks(real_chunks):
         question, Searcher(real_chunks), llm, today=date(2027, 1, 1), mode="keyword"
     )
     assert "시행 전" not in result["text"]
+
+
+
+# 참고 조항: LLM이 찾을 수 없다고 답했지만 검색 결과가 있으면 검색 상위 조항을 코드가 고른다
+
+def numbered_chunks(n):
+    return [chunk(article_no=f"제{i}조", body=f"계약 조항 {i}") for i in range(1, n + 1)]
+
+
+def test_llm_not_found_has_top_search_references():
+    result = ask(FakeLLM(NOT_FOUND), chunks=numbered_chunks(5))
+    assert result["text"] == NOT_FOUND
+    refs = result["references"]
+    assert len(refs) == REFERENCE_COUNT == 3
+    assert refs == result["retrieved"][:3]  # 검색 순위 그대로
+
+
+def test_references_skip_duplicate_articles():
+    chunks = [chunk(article_no="제2조", body="계약 앞부분"), chunk(article_no="제2조", body="계약 뒷부분"),
+              chunk(article_no="제3조", body="계약 조항"), chunk(article_no="제4조", body="계약 조항")]
+    result = ask(FakeLLM(NOT_FOUND), chunks=chunks)
+    first_seen = list(dict.fromkeys(c["article_no"] for c in result["retrieved"]))
+    assert [c["article_no"] for c in result["references"]] == first_seen == ["제3조", "제4조", "제2조"]
+
+
+def test_references_contain_no_llm_text():
+    reply = f"{NOT_FOUND} 다만 제2조를 보면 대기해야 합니다."
+    result = ask(FakeLLM(reply))
+    assert result["references"]
+    assert all("대기해야" not in str(value) for c in result["references"] for value in c.values())
+
+
+def test_no_search_result_has_no_references():
+    assert ask(FakeLLM(), question="zzzz")["references"] == []
+
+
+@pytest.mark.parametrize("reply", ["", "계약 기간은 3년입니다."])
+def test_unverified_answer_has_no_references(reply):
+    """근거를 확인하지 못한 답변은 찾을 수 없음이 아니므로 참고 목록을 붙이지 않는다."""
+    assert ask(FakeLLM(reply))["references"] == []
+
+
+def test_normal_answer_has_no_references():
+    assert ask(FakeLLM())["references"] == []
+
+
+def test_system_prompt_has_no_partial_guidance():
+    assert f'근거에 답이 없으면 다른 말 없이 "{NOT_FOUND}"라고만 답합니다' in SYSTEM_PROMPT
+    assert "직접 나와 있지 않습니다" not in SYSTEM_PROMPT
+
+
+def test_review_report_lists_references_for_not_found():
+    question = load_review_questions()[0]
+    result = ask(FakeLLM(NOT_FOUND), chunks=numbered_chunks(2))
+    report = render([(question, result)])
+    assert "- 화면 참고 목록: 선수 규정 제1조 계약기간 ① / 선수 규정 제2조 계약기간 ①" in report
+    report = render([(question, ask(FakeLLM(), question="zzzz"))])
+    assert "- 화면 참고 목록: 없음" in report
+
+
+# 결론 표지어: 일반 답변에 "따라서", "그러므로"가 있으면 찾을 수 없음 + 참고 목록으로 낮춘다
+
+@pytest.mark.parametrize("marker", ["따라서", "그러므로"])
+def test_conclusion_marker_downgrades_to_not_found(marker):
+    reply = f"구급차 2대를 대기시켜야 합니다 [1]. {marker} 대체 구급차가 올 때까지 기다려야 합니다."
+    result = ask(FakeLLM(reply), chunks=numbered_chunks(4))
+    assert result["not_found"] is True
+    assert result["text"] == NOT_FOUND
+    assert result["citations"] == []
+    assert result["reason"] == f"{REASON_CONCLUSION}: {marker}"
+    assert result["raw"] == reply  # 평가 결과 파일에 원문이 남는다
+    assert [c["article_no"] for c in result["references"]] == ["제1조", "제2조", "제3조"]
+
+
+def test_downgraded_references_have_no_llm_text():
+    result = ask(FakeLLM("계약 기간은 5년입니다 [1]. 따라서 연장해야 합니다."))
+    assert all("연장해야" not in str(v) for c in result["references"] for v in c.values())
+
+
+def test_reason_lists_every_marker_found():
+    result = ask(FakeLLM("5년입니다 [1]. 따라서 A이고 그러므로 B입니다."))
+    assert result["reason"] == f"{REASON_CONCLUSION}: 따라서, 그러므로"
+
+
+def test_answer_without_marker_is_kept():
+    result = ask(FakeLLM("최소 5개월에서 최대 5년입니다 [1]. 다만 군팀은 예외입니다 [1]."))
+    assert result["not_found"] is False
+    assert result["references"] == []
+
+
+def test_conclusion_markers_are_fixed():
+    assert CONCLUSION_MARKERS == ("따라서", "그러므로")
+
+
+def test_system_prompt_has_hypothetical_situation_rule():
+    assert "질문이 가정한 상황이 근거에 직접 나와 있지 않으면" in SYSTEM_PROMPT
+    assert "그 조항으로 결론을 추론하지 말고" in SYSTEM_PROMPT
+
+
+def test_review_report_shows_downgrade_reason():
+    question = load_review_questions()[0]
+    reply = "2대입니다 [1]. 따라서 기다려야 합니다."
+    report = render([(question, ask(FakeLLM(reply), chunks=numbered_chunks(2)))])
+    assert "- 찾을 수 없음 사유: 결론 표지어로 낮춤: 따라서" in report
+    assert "- 화면 참고 목록: 선수 규정 제1조 계약기간 ① / 선수 규정 제2조 계약기간 ①" in report
+    assert reply in report
