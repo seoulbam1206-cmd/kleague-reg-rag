@@ -43,6 +43,7 @@ K리그 규정 문서에 근거해 조문을 인용하며 답하는 RAG 챗봇.
 .venv/Scripts/python src/extract.py                       # PDF 추출 (data/extracted)
 .venv/Scripts/python src/chunk.py                         # 청킹 (data/chunks)
 .venv/Scripts/python scripts/eval_search.py --model intfloat/multilingual-e5-small  # 검색 평가
+.venv/Scripts/python scripts/build_vectors.py              # 배포용 벡터 다시 계산 (청크가 바뀌면 실행 후 index/ 커밋)
 .venv/Scripts/python src/answer.py "질문"                  # 질문하기 (.env 필요)
 .venv/Scripts/python scripts/eval_answer.py               # 답변 평가 11문항 (.env 필요)
 .venv/Scripts/python scripts/eval_answer.py --repeat 3 --only Q07,Q30  # 판정이 달라진 문항만 3회 (.env 필요)
