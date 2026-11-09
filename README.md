@@ -5,7 +5,7 @@ K리그 공개 규정 17개를 근거로, 조문을 인용하며 답하는 질�
 > **한국프로축구연맹 공식 서비스가 아닌 개인 포트폴리오 프로젝트입니다. 답변은 공식 해석이 아닙니다.**
 > AI 답변은 틀릴 수 있으므로 반드시 인용된 조문 원문을 확인하세요.
 
-- 데모: (배포 후 주소 추가)
+- 데모: https://kleague-reg-rag-egmydbc5th9ihxubeem2kg.streamlit.app/ (처음 열 때 규정을 받아 준비하느라 몇 분 걸릴 수 있습니다)
 - 스택: Python 3.12, pdfplumber, BM25 + multilingual-e5-small(ONNX Runtime), Groq API, Streamlit
 
 ## 목차
