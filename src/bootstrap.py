@@ -6,7 +6,11 @@
 - 다운로드가 실패해도 이미 받은 PDF로 계속한다. PDF가 하나도 없으면 실패로 끝낸다.
 - 규정 하나의 추출이 실패하면 그 규정만 빼고, 이름을 status.json에 남겨 화면에 알린다.
 - 시행일을 직접 적어 둔 규정이 개정되면 멈추지 않고 "시행일 재확인 필요"로 표시한다.
+- 청크에 영향을 주는 파일(추출·청킹 코드, 수동 요약, 표 구조)의 지문을 status.json에 남긴다.
+  GitHub에 새 버전을 올렸는데 서버에 이전 청크가 남아 있으면 지문이 달라 다시 만든다.
 """
+
+import hashlib
 
 import json
 import sys
@@ -20,6 +24,8 @@ from extract import PDF_DIR, extract_document, load_manual_pages
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 STATUS_FILE = "status.json"
+# 청크 내용을 바꾸는 파일. 규정 목록(manifest.json)은 다운로드가 다시 쓰므로 넣지 않는다
+DATA_INPUTS = ["src/extract.py", "src/chunk.py", "src/tables.py", "src/enforcement.py", "docs_public/manual"]
 
 STEPS = {
     "download": "규정 문서를 공식 사이트에서 받는 중... (1~2분)",
@@ -34,6 +40,20 @@ class Prepared:
     failed: list[str] = field(default_factory=list)  # 불러오지 못한 규정명
     error: str = ""  # 전체 실패 사유. ok가 False일 때만 쓴다
     download_error: str = ""  # 다운로드 중 오류. 받아 둔 PDF로 계속했을 수 있다
+    version: str = ""  # 이 청크를 만든 입력 파일의 지문 (data_version)
+
+
+def data_version(root: Path = ROOT) -> str:
+    """청크를 만드는 코드와 수동 자료의 지문. 하나라도 바뀌면 달라진다."""
+    digest = hashlib.sha256()
+    for name in DATA_INPUTS:
+        path = root / name
+        files = sorted(p for p in path.rglob("*") if p.is_file()) if path.is_dir() else [path]
+        for file in files:
+            if file.exists():
+                digest.update(file.relative_to(root).as_posix().encode("utf-8") + b"\0")
+                digest.update(file.read_bytes().replace(b"\r\n", b"\n") + b"\0")
+    return digest.hexdigest()[:12]
 
 
 def default_download() -> None:
@@ -48,14 +68,24 @@ def chunk_file(data_dir: Path = DATA_DIR) -> Path:
 
 
 def is_ready(data_dir: Path = DATA_DIR) -> bool:
-    return chunk_file(data_dir).exists()
+    """청크 파일이 있고, 지금 코드·수동 자료로 만든 것이면 준비됨.
+
+    status.json이 없으면(로컬에서 src/chunk.py로 만든 경우) 청크 파일만 본다.
+    """
+    if not chunk_file(data_dir).exists():
+        return False
+    path = data_dir / STATUS_FILE
+    if not path.exists():
+        return True
+    return json.loads(path.read_text(encoding="utf-8")).get("version") == data_version()
 
 
 def read_status(data_dir: Path = DATA_DIR) -> Prepared:
     path = data_dir / STATUS_FILE
     if not path.exists():
         return Prepared(ok=is_ready(data_dir))
-    return Prepared(**json.loads(path.read_text(encoding="utf-8")))
+    fields = Prepared.__dataclass_fields__
+    return Prepared(**{k: v for k, v in json.loads(path.read_text(encoding="utf-8")).items() if k in fields})
 
 
 def write_status(result: Prepared, data_dir: Path) -> None:
@@ -66,10 +96,11 @@ def write_status(result: Prepared, data_dir: Path) -> None:
 def prepare_data(on_step: Callable[[str], None] | None = None,
                  download: Callable[[], None] = default_download,
                  pdf_dir: Path = PDF_DIR, data_dir: Path = DATA_DIR) -> Prepared:
-    """청크 파일이 없으면 만든다. 이미 있으면 받지 않고 지난 결과를 돌려준다."""
+    """청크 파일이 없거나 이전 버전으로 만든 것이면 만든다. 준비되어 있으면 지난 결과를 돌려준다."""
     if is_ready(data_dir):
         return read_status(data_dir)
     step = on_step or (lambda name: None)
+    version = data_version()
 
     step("download")
     download_error = ""
@@ -83,7 +114,8 @@ def prepare_data(on_step: Callable[[str], None] | None = None,
     entries = sorted(entries, key=lambda e: e["no"])
     available = [e for e in entries if e.get("files") and (pdf_dir / e["files"][0]["file"]).exists()]
     if not available:
-        result = Prepared(ok=False, error="규정 문서를 받지 못했습니다", download_error=download_error)
+        result = Prepared(ok=False, error="규정 문서를 받지 못했습니다", download_error=download_error,
+                          version=version)
         write_status(result, data_dir)
         return result
 
@@ -105,12 +137,13 @@ def prepare_data(on_step: Callable[[str], None] | None = None,
         except Exception:
             failed.append(doc["title"])
     if not chunks:
-        result = Prepared(ok=False, failed=failed, error="규정 문서를 읽지 못했습니다", download_error=download_error)
+        result = Prepared(ok=False, failed=failed, error="규정 문서를 읽지 못했습니다",
+                          download_error=download_error, version=version)
         write_status(result, data_dir)
         return result
 
     chunk_file(data_dir).parent.mkdir(parents=True, exist_ok=True)
     write_jsonl(chunk_file(data_dir), chunks)
-    result = Prepared(ok=True, failed=failed, download_error=download_error)
+    result = Prepared(ok=True, failed=failed, download_error=download_error, version=version)
     write_status(result, data_dir)
     return result

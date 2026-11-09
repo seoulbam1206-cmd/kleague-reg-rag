@@ -378,3 +378,60 @@ def test_committed_vectors_cover_current_chunks():
 def test_onnx_session_does_not_hold_memory_arena():
     assert search.CPU_MEM_ARENA is False
     assert search.EMBED_BATCH <= 8
+
+
+# 새 버전을 올렸을 때 서버에 남은 이전 청크를 다시 만든다
+
+def test_data_version_changes_with_manual_tables_and_code(tmp_path):
+    for name in ("src/extract.py", "src/chunk.py", "src/tables.py", "src/enforcement.py"):
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text("code", encoding="utf-8")
+    table = tmp_path / "docs_public" / "manual" / "tables" / "16_p57.json"
+    table.parent.mkdir(parents=True)
+    table.write_text("{}", encoding="utf-8")
+    before = bootstrap.data_version(tmp_path)
+    table.write_text('{"rows": []}', encoding="utf-8")
+    after_table = bootstrap.data_version(tmp_path)
+    (tmp_path / "src" / "chunk.py").write_text("code v2", encoding="utf-8")
+    assert len({before, after_table, bootstrap.data_version(tmp_path)}) == 3
+
+
+def test_data_version_ignores_line_endings(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "extract.py").write_bytes(b"a\nb\n")
+    lf = bootstrap.data_version(tmp_path)
+    (tmp_path / "src" / "extract.py").write_bytes(b"a\r\nb\r\n")  # Windows 체크아웃과 Linux 서버가 같게
+    assert bootstrap.data_version(tmp_path) == lf
+
+
+def test_stale_chunks_from_older_version_are_rebuilt(tmp_path, fake_pipeline):
+    pdf_dir, data_dir = tmp_path / "pdf", tmp_path / "data"
+    download = lambda: write_manifest(pdf_dir, ["가"], [True])  # noqa: E731
+    assert bootstrap.prepare_data(download=download, pdf_dir=pdf_dir, data_dir=data_dir).ok
+    assert bootstrap.read_status(data_dir).version == bootstrap.data_version()
+    status = data_dir / bootstrap.STATUS_FILE
+    status.write_text(json.dumps({"ok": True, "failed": [], "error": "", "download_error": "", "version": "old"}),
+                      encoding="utf-8")
+    assert not bootstrap.is_ready(data_dir)
+    steps = []
+    assert bootstrap.prepare_data(on_step=steps.append, download=download, pdf_dir=pdf_dir, data_dir=data_dir).ok
+    assert steps == ["download", "extract", "chunk"]
+    assert bootstrap.is_ready(data_dir)
+
+
+def test_status_without_version_counts_as_old_but_local_build_without_status_is_ready(tmp_path):
+    data_dir = tmp_path / "data"
+    bootstrap.chunk_file(data_dir).parent.mkdir(parents=True)
+    bootstrap.chunk_file(data_dir).write_text("{}\n", encoding="utf-8")
+    assert bootstrap.is_ready(data_dir)  # 로컬에서 src/chunk.py로 만든 경우
+    (data_dir / bootstrap.STATUS_FILE).write_text(json.dumps({"ok": True}), encoding="utf-8")
+    assert not bootstrap.is_ready(data_dir)  # 지문 기능 이전에 서버가 만든 청크
+    assert bootstrap.read_status(data_dir).ok
+
+
+def test_searcher_cache_is_keyed_by_data_version():
+    import inspect
+    import app
+    assert "version" in inspect.signature(app.load_searcher).parameters
+    source = inspect.getsource(app)
+    assert source.count("load_searcher(bootstrap.data_version())") == 2

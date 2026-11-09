@@ -567,3 +567,79 @@ def test_secrets_fill_missing_environment(monkeypatch):
     assert os.environ["GROQ_MODEL"] == "secret-model"
     assert os.environ["GROQ_API_KEY"] == "from-env"  # 이미 있는 환경변수는 덮어쓰지 않는다
     monkeypatch.delenv("GROQ_MODEL")
+
+
+# 표 구조와 원문 페이지 보기
+
+PARKING_ROW = "주차장 > 긴급구조차량 > 경찰버스 (기준 A): ★★★★ 4대, ★★★ 4대, ★★ 신축 2대, ★★ 기존 1대, ★ 1대 (관련 조항 7.5.)"
+FIRE_ROW = "주차장 > 긴급구조차량 > 소방차 (기준 A): ★★★★ 2대, ★★★ 2대, ★★ 신축 2대, ★★ 기존 1대, ★ 1대 (관련 조항 7.5.)"
+
+
+def table_chunk():
+    item = chunk(regulation="K리그 경기장 시설기준 가이드라인", article_no="별첨1",
+                 body=f"■ 주차장\n{FIRE_ROW}\n{PARKING_ROW}")
+    return {**item, "doc_no": 16, "pages": [57], "id": "16-별첨1-7"}
+
+
+def test_manual_table_rows_are_drawn_as_merged_html_table():
+    from app import source_blocks
+    blocks = source_blocks(f"앞 줄\n{FIRE_ROW}\n{PARKING_ROW}\n뒷 줄")
+    assert [kind for kind, _ in blocks] == ["text", "html", "text"]
+    html = blocks[1][1]
+    assert '<th colspan="2">★★</th>' in html  # 머리글 2층
+    assert '<td rowspan="2">긴급구조차량</td>' in html  # 걸친 칸은 청크 안의 행만큼
+    assert "버스" not in html.replace("경찰버스", "")  # 청크에 없는 행은 그리지 않는다
+
+
+def test_table_chunk_shows_html_table_and_page_image_by_default():
+    at = ask(start(searcher=FakeSearcher([table_chunk()]), llm=FakeLLM("경찰버스 1대입니다 [1].")), "경찰버스")
+    assert not at.exception
+    assert any("<table" in m.value for m in at.expander[0].markdown)
+    assert at.expander[0].toggle[0].value is True
+
+
+def test_plain_chunk_hides_page_image_until_toggled():
+    at = ask(start(), "계약 기간")
+    toggle = at.expander[0].toggle[0]
+    assert toggle.label == "원문 페이지 보기" and toggle.value is False
+    at = toggle.set_value(True).run()
+    assert not at.exception
+    assert any("원문 페이지를 불러오지 못했습니다" in c.value for c in at.expander[0].caption)  # 가짜 청크라 PDF가 없다
+
+
+def test_page_image_renders_real_pdf_page():
+    from app import page_image, pdf_files
+    file = pdf_files().get(16)
+    if not file or not (bootstrap.PDF_DIR / file).exists():
+        pytest.skip("규정 PDF 없음")
+    image = page_image(file, 57)
+    assert image and image[:8] == b"\x89PNG\r\n\x1a\n"
+    assert page_image("없는파일.pdf", 1) is None
+
+
+RAW_TABLE = "7.6. 경기장은 최소 다음과 같은 주차 공간을 제공해야 한다.\n| 기준 | 항목 |  | ★★★★ |\n| --- | --- | --- | --- |\n| A | 선수단 | 버스 | 4대 |"
+
+
+def raw_table_chunk():
+    item = chunk(regulation="K리그 경기장 시설기준 가이드라인", article_no="제7조", body=RAW_TABLE)
+    return {**item, "doc_no": 16, "pages": [16], "id": "16-제7조-1"}
+
+
+def test_unrestored_table_shows_page_image_first_and_folds_text():
+    at = ask(start(searcher=FakeSearcher([raw_table_chunk()]), llm=FakeLLM("버스 4대입니다 [1].")), "버스")
+    assert not at.exception
+    box = at.expander[0]
+    assert [type(c).__name__ for c in box.children.values()][0] == "Image"  # 원문 16쪽 이미지가 맨 앞
+    toggle = box.toggle[0]
+    assert toggle.label == "추출 텍스트 보기" and toggle.value is False
+    assert not any("선수단" in m.value for m in box.markdown)
+    at = toggle.set_value(True).run()
+    assert any("선수단" in m.value for m in at.expander[0].markdown)
+
+
+def test_ai_text_is_unchanged_for_unrestored_table():
+    """화면 표시만 바꾼다. LLM에 보내는 청크 텍스트에는 표 줄이 그대로 있다."""
+    from answer import build_user_prompt
+    from datetime import date
+    prompt = build_user_prompt("버스", [raw_table_chunk()], date(2026, 11, 9))
+    assert "| A | 선수단 | 버스 | 4대 |" in prompt

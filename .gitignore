@@ -29,3 +29,6 @@ data/
 
 # Streamlit 비밀값 (배포에서는 Cloud의 Secrets 설정에 넣는다)
 .streamlit/secrets.toml
+
+# 표 구조 검토 페이지 (scripts/build_table_review.py로 만든다. 원본 페이지 이미지가 들어 있음)
+review/

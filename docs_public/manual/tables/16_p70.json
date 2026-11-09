@@ -1,0 +1,112 @@
+{
+  "status": "사용자 검토 완료 (2026-11-09)",
+  "source": "K리그 경기장 시설기준 가이드라인",
+  "source_file": "16_K리그_경기장_시설기준_가이드라인_20241203.pdf",
+  "page": 70,
+  "table": 1,
+  "title": "별첨2 참고문헌",
+  "note": "PDF의 칸 경계로 만든 초안을 원본 이미지와 대조했다. 칸 안에서 줄이 바뀐 URL은 공백을 지워 이었다.",
+  "header": [
+    [
+      "발행기관",
+      "제목",
+      "발행연도",
+      "검색"
+    ]
+  ],
+  "rows": [
+    [
+      {
+        "text": "국제축구연맹 (FIFA)",
+        "rowspan": 2
+      },
+      "Football Stadiums Technical recommendations",
+      "2011",
+      ""
+    ],
+    [
+      "Football Stadium Guidelines",
+      "2022",
+      "https://publications.fifa.com/en/football-stadiums-guidelines/"
+    ],
+    [
+      {
+        "text": "아시아축구연맹 (AFC)",
+        "rowspan": 3
+      },
+      "AFC Stadium Regulations",
+      "2021",
+      "https://www.the-afc.com/en/more/content/afc_stadium_regulations_edition_2021.html"
+    ],
+    [
+      "AFC Stadium Lighting Guidelines",
+      "2018",
+      "https://www.the-afc.com/en/more/content/afc_stadium_lighting_guidelines_2018.html"
+    ],
+    [
+      "AFC Competition Operations Manual",
+      "2023",
+      "https://www.the-afc.com/en/more/content/afc_competition_operations_manual_edition_2023.html"
+    ],
+    [
+      {
+        "text": "유럽축구연맹 (UEFA)",
+        "rowspan": 4
+      },
+      "UEFA Stadium Infrastructure Regulations",
+      "2018",
+      "https://documents.uefa.com/r/~8EF5wwwZzvgRyjrEnIjmw/root"
+    ],
+    [
+      "UEFA Pitch Quality Guidelines Natural turf pitch management",
+      "2018",
+      "https://documents.uefa.com/v/u/UEFA-Guidelines/UEFA-Pitch-Quality-Guidelines-2018"
+    ],
+    [
+      "UEFA Guide to Quality Stadiums",
+      "2011",
+      "https://documents.uefa.com/v/u/UEFA-Guidelines/UEFA-Guide-to-Quality-Stadiums-Edition-2011"
+    ],
+    [
+      "UEFA EURO 2024 Tournament Requirements",
+      "2017",
+      ""
+    ],
+    [
+      "잉글랜드축구협회 (The FA)",
+      "Natural Grass Pitches",
+      "",
+      "https://www.thefa.com/-/media/cfa/durhamfa/files/facility-and-football-pitch-development/ntp/ff-data-sheets_natural-grass-pitches.ashx"
+    ],
+    [
+      "일본축구협회 (JFA)",
+      "JFA 스타디움 표준 (スタジアム標準)",
+      "2010",
+      "https://www.jfa.jp/documents/pdf/basic/07/01.pdf"
+    ],
+    [
+      "일본프로축구리그 (J리그)",
+      "J리그 스타디움 기준 (Ｊリーグスタジアム基準)",
+      "2023",
+      "https://aboutj.jleague.jp/corporate/assets/pdf/regulation/jleague/jleague_stadium_standards.pdf"
+    ],
+    [
+      "프랑스프로축구리그 (LFP)",
+      "2022/23 Season Club Licensing Manual",
+      "2022",
+      "https://www.lfp.fr/-/media/Project/LFP/LFP/Documents/R%C3%A8glements/Manuel-Licence-Club-2022-2023.pdf"
+    ],
+    [
+      "독일프로축구리그 (DFL)",
+      "Barrier-free in Stadiums",
+      "2009",
+      "https://media.dfl.de/sites/2/2018/11/dfl-barrierefrei-im-stadion-1.pdf"
+    ]
+  ],
+  "roles": [
+    "path",
+    "path",
+    "value",
+    "value"
+  ]
+}

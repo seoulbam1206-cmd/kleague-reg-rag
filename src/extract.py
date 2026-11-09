@@ -2,6 +2,7 @@
 
 페이지 수를 원본과 맞추기 위해 표지·목차·뒤표지도 kind를 표시해 남기고 text만 비운다.
 이미지라서 텍스트가 없는 페이지는 docs_public/manual/의 수동 요약으로 채운다.
+칸이 복잡하게 합쳐진 표는 docs_public/manual/tables/의 표 구조로 바꾸고, 행마다 열 제목을 붙인 줄로 넣는다.
 기준일은 등록일이 아니라 manifest의 body_text에서 구한다.
 """
 
@@ -21,6 +22,7 @@ from check_pdfs import TABLE_SETTINGS  # noqa: E402
 sys.path.insert(0, str(ROOT / "src"))
 
 from enforcement import load_enforcement_rules, resolve_enforcement  # noqa: E402
+from tables import load_tables, row_texts  # noqa: E402
 
 PDF_DIR = ROOT / "docs_public"
 MANUAL_DIR = PDF_DIR / "manual"
@@ -153,16 +155,32 @@ def table_rows(table, page) -> list[list[str | None]]:
     ]
 
 
-def page_blocks(page) -> tuple[list[str], int]:
-    """표 밖 텍스트 줄과 표를 세로 위치 순으로 합친다. (줄 목록, 표 개수)를 돌려준다."""
-    tables = drop_nested_tables(page.find_tables(TABLE_SETTINGS))
+def manual_table_lines(manual: dict, table, page) -> str:
+    """사람이 옮겨 적은 표 구조로 바꾼다. 자동 추출한 행 수와 다르면 다른 표이므로 멈춘다."""
+    expected = len(manual["header"]) + len(manual["rows"])
+    if len(table.rows) != expected:
+        raise ValueError(f"표 구조 {manual['id']}의 행 수({expected})가 원본 {page.page_number}쪽 표({len(table.rows)})와 다름")
+    return "\n".join(row_texts(manual))
+
+
+def page_blocks(page, manual_tables: dict[int, dict] | None = None) -> tuple[list[str], int]:
+    """표 밖 텍스트 줄과 표를 세로 위치 순으로 합친다. (줄 목록, 표 개수)를 돌려준다.
+
+    manual_tables는 {그 쪽의 몇 번째 표(위에서부터 1번): 표 구조}다.
+    """
+    manual_tables = manual_tables or {}
+    tables = sorted(drop_nested_tables(page.find_tables(TABLE_SETTINGS)), key=lambda t: t.bbox[1])
     boxes = [t.bbox for t in tables]
     rest = page.filter(
         lambda o: o.get("object_type") != "char" or not any(_in_bbox(o, b) for b in boxes)
     )
     blocks = [(line["top"], clean_text(line["text"])) for line in rest.extract_text_lines()]
     rendered = 0
-    for table in tables:
+    for number, table in enumerate(tables, 1):
+        if number in manual_tables:
+            blocks.append((table.bbox[1], manual_table_lines(manual_tables[number], table, page)))
+            rendered += 1
+            continue
         markdown = table_to_markdown(table_rows(table, page))
         if markdown:
             blocks.append((table.bbox[1], markdown))
@@ -182,24 +200,28 @@ def load_manual_pages(folder: Path = MANUAL_DIR) -> dict[tuple[str, int], str]:
     return pages
 
 
-def extract_pdf(path: Path, manual: dict[tuple[str, int], str] | None = None) -> list[dict]:
+def extract_pdf(path: Path, manual: dict[tuple[str, int], str] | None = None,
+                tables: dict[tuple[str, int, int], dict] | None = None) -> list[dict]:
     manual = manual or {}
+    tables = load_tables() if tables is None else tables
     results = []
     prev_is_toc = False
     with pdfplumber.open(path) as pdf:
         count = len(pdf.pages)
         for no, page in enumerate(pdf.pages, 1):
-            lines, tables = page_blocks(page)
+            here = {number: t for (file, page_no, number), t in tables.items()
+                    if file == path.name and page_no == no}
+            lines, table_count = page_blocks(page, here)
             lines = strip_page_marks([line for line in lines if line.strip()])
             kind = classify_page(lines, no, count, prev_is_toc)
             prev_is_toc = kind == "toc"
             if (path.name, no) in manual:
-                kind, text, tables = "manual", manual[(path.name, no)], 0
+                kind, text, table_count = "manual", manual[(path.name, no)], 0
             elif kind in ("cover", "toc", "back_cover"):
-                text, tables = "", 0
+                text, table_count = "", 0
             else:
                 text = "\n".join(lines)
-            results.append({"page": no, "kind": kind, "text": text, "tables": tables})
+            results.append({"page": no, "kind": kind, "text": text, "tables": table_count})
     return results
 
 

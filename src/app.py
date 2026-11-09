@@ -7,6 +7,8 @@
 배포 환경에서는 첫 화면이 열릴 때 규정 PDF를 받아 청크를 만든다 (bootstrap.py).
 """
 
+import io
+import json
 import os
 import re
 import threading
@@ -18,6 +20,7 @@ import bootstrap
 from answer import MissingConfigError, answer_question, build_searcher, chunk_label, create_llm
 from enforcement import chunk_notice
 from limits import UsageLimiter
+from tables import load_tables, row_index, table_html
 
 MAX_QUESTION_CHARS = 500
 MIN_INTERVAL_SECONDS = 5
@@ -41,6 +44,9 @@ STAGES = {
 # Streamlit Secrets의 이 값들을 환경변수로 옮긴다. 로컬에서는 .env를 쓴다 (answer.create_llm)
 SECRET_KEYS = ("LLM_PROVIDER", "GROQ_API_KEY", "GROQ_MODEL", "OPENAI_API_KEY", "OPENAI_MODEL", "HF_TOKEN")
 WARMUP_QUERY = "선수 계약 기간"  # 임베딩 모델의 첫 계산(약 0.7초)을 미리 치른다
+PAGE_SCALE = 1.5  # 원문 페이지 이미지 배율 (72dpi 기준, A4 한 쪽이 약 890x1260 픽셀)
+PAGE_CACHE = 24  # 서버 전체에서 기억해 둘 페이지 이미지 수
+MSG_PAGE_ERROR = "원문 페이지를 불러오지 못했습니다."
 
 # 평가 질문지에서 고른 예시 (조번호 Q01, 표 Q14, 규정에 없는 질문 Q19)
 EXAMPLES = [
@@ -97,6 +103,133 @@ def source_markdown(body: str) -> str:
     return "\n\n".join(blocks)
 
 
+@st.cache_resource
+def manual_tables() -> tuple[dict, dict]:
+    """사람이 옮겨 적은 표 구조와, 행 텍스트로 표 행을 찾는 사전."""
+    tables = load_tables()
+    return {table["id"]: table for table in tables.values()}, row_index(tables)
+
+
+def source_blocks(body: str) -> list[tuple[str, str]]:
+    """조문 원문을 ("text", 줄들) 또는 ("html", 표) 조각으로 나눈다.
+
+    표 구조가 있는 표의 행은 청크 본문에 "열 제목: 값" 줄로 들어 있다. 이어진 행을 모아
+    원본처럼 칸이 합쳐진 HTML 표로 바꾼다.
+    """
+    by_id, index = manual_tables()
+    blocks: list[tuple[str, str]] = []
+    lines: list[str] = []
+    run: tuple[str, list[int]] | None = None
+
+    def flush_run() -> None:
+        nonlocal run
+        if run:
+            blocks.append(("html", table_html(by_id[run[0]], run[1])))
+            run = None
+
+    def flush_lines() -> None:
+        if lines:
+            blocks.append(("text", "\n".join(lines)))
+            lines.clear()
+
+    for line in body.splitlines():
+        hit = index.get(line)
+        if hit and run and run[0] == hit[0] and run[1][-1] + 1 == hit[1]:
+            run[1].append(hit[1])
+        elif hit:
+            flush_lines()
+            flush_run()
+            run = (hit[0], [hit[1]])
+        else:
+            flush_run()
+            lines.append(line)
+    flush_run()
+    flush_lines()
+    return blocks
+
+
+def has_table(body: str) -> bool:
+    """표 구조로 복원한 표의 행이 있는가."""
+    _, index = manual_tables()
+    return any(line in index for line in body.splitlines())
+
+
+def has_raw_table(body: str) -> bool:
+    """아직 복원하지 않은 자동 추출 표(마크다운 줄)가 있는가. 칸 합치기가 풀려 보기 어려울 수 있다."""
+    return any(line.startswith("|") for line in body.splitlines())
+
+
+@st.cache_data(show_spinner=False)
+def pdf_files() -> dict[int, str]:
+    manifest = bootstrap.PDF_DIR / "manifest.json"
+    if not manifest.exists():
+        return {}
+    entries = json.loads(manifest.read_text(encoding="utf-8"))
+    return {e["no"]: e["files"][0]["file"] for e in entries if e.get("files")}
+
+
+@st.cache_resource
+def render_lock() -> threading.Lock:
+    """PDF 렌더링 라이브러리(pdfium)는 여러 스레드가 동시에 쓰면 안 된다."""
+    return threading.Lock()
+
+
+@st.cache_data(max_entries=PAGE_CACHE, show_spinner=False)
+def page_image(file: str, page: int) -> bytes | None:
+    """원본 PDF 한 쪽을 PNG로 그린다. 파일이 없거나 실패하면 None."""
+    path = bootstrap.PDF_DIR / file
+    if not path.exists():
+        return None
+    try:
+        import pypdfium2
+
+        with render_lock():
+            pdf = pypdfium2.PdfDocument(str(path))
+            try:
+                image = pdf[page - 1].render(scale=PAGE_SCALE).to_pil()
+            finally:
+                pdf.close()
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        return buffer.getvalue()
+    except Exception:
+        return None
+
+
+def render_page_images(chunk: dict) -> None:
+    file = pdf_files().get(chunk.get("doc_no"))
+    for page in chunk.get("pages", []):
+        image = page_image(file, page) if file else None
+        if image:
+            st.image(image, caption=f"원문 {page}쪽")
+        else:
+            st.caption(f"{MSG_PAGE_ERROR} ({page}쪽)")
+
+
+def render_blocks(body: str) -> None:
+    for kind, content in source_blocks(body):
+        if kind == "html":
+            st.markdown(content, unsafe_allow_html=True)  # 표 구조 파일의 글자는 table_html이 이스케이프한다
+        else:
+            st.markdown(source_markdown(content))
+
+
+def render_source(chunk: dict, key: str) -> None:
+    """조문 원문을 보여준다. 화면 표시만 다르고 AI·검색에 쓰는 청크 텍스트는 그대로다.
+
+    - 복원하지 않은 표가 있으면: 원문 페이지 이미지를 먼저 보이고, 추출 텍스트는 켜야 보인다
+    - 그 밖에는: 추출 텍스트(복원한 표는 HTML 표)를 보이고, 원문 페이지는 복원한 표가 있을 때만 처음부터 보인다
+    """
+    if has_raw_table(chunk["body"]):
+        render_page_images(chunk)
+        if st.toggle("추출 텍스트 보기", value=False, key=f"{key}-text"):
+            render_blocks(chunk["body"])
+        return
+    render_blocks(chunk["body"])
+    if st.toggle("원문 페이지 보기", value=has_table(chunk["body"]), key=key):
+        render_page_images(chunk)
+
+
 def reference_label(chunk: dict) -> str:
     """참고 조항 제목. 검색 결과의 메타데이터로만 만든다."""
     pages = ", ".join(str(page) for page in chunk["pages"])
@@ -114,8 +247,9 @@ def citation_label(item: dict) -> str:
     return label
 
 
-@st.cache_resource(show_spinner="검색 데이터를 불러오는 중...")
-def load_searcher():
+@st.cache_resource(show_spinner="검색 데이터를 불러오는 중...", max_entries=1)
+def load_searcher(version: str = ""):
+    """version(데이터 지문)이 바뀌면 새로 만든다. 이전 검색기는 메모리에서 내보낸다 (max_entries=1)."""
     searcher = build_searcher()
     searcher.search(WARMUP_QUERY, k=1)
     return searcher
@@ -162,7 +296,7 @@ def preload(slot) -> None:
     if status.failed:
         slot.warning(failed_notice(status.failed))
     try:
-        load_searcher()
+        load_searcher(bootstrap.data_version())
     except Exception:
         pass
 
@@ -194,7 +328,7 @@ def load_llm():
 
 def get_backend():
     state = st.session_state
-    searcher = state["searcher"] if "searcher" in state else load_searcher()
+    searcher = state["searcher"] if "searcher" in state else load_searcher(bootstrap.data_version())
     llm = state["llm"] if "llm" in state else load_llm()
     return searcher, llm
 
@@ -244,9 +378,9 @@ def render_references(chunks: list[dict]) -> None:
     if not chunks:
         return
     st.subheader(REFERENCE_TITLE)
-    for chunk in chunks:
+    for i, chunk in enumerate(chunks):
         with st.expander(reference_label(chunk), expanded=False):
-            st.markdown(source_markdown(chunk["body"]))
+            render_source(chunk, key=f"page-ref-{i}-{chunk.get('id', '')}")
 
 
 def render_result(result: dict) -> None:
@@ -265,7 +399,7 @@ def render_result(result: dict) -> None:
     for i, item in enumerate(result["citations"]):
         chunk = result["retrieved"][item["number"] - 1]
         with st.expander(citation_label(item), expanded=i == 0):
-            st.markdown(source_markdown(chunk["body"]))
+            render_source(chunk, key=f"page-cite-{item['number']}-{chunk.get('id', '')}")
 
 
 def main() -> None:

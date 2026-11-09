@@ -17,6 +17,7 @@ from extract import (
     strip_page_marks,
     table_to_markdown,
 )
+from tables import load_tables
 
 PAGE_COUNTS = {
     1: 24, 2: 15, 3: 9, 4: 9, 5: 20, 6: 14, 7: 8, 8: 20, 9: 34,
@@ -220,11 +221,16 @@ def _letters(text: str) -> Counter:
 
 @pytest.mark.slow
 def test_no_text_lost_or_duplicated(docs):
-    """표 처리 전후로 글자가 사라지거나 중복되면 안 된다 (쪽번호 제외)."""
+    """표 처리 전후로 글자가 사라지거나 중복되면 안 된다 (쪽번호 제외).
+
+    표 구조로 복원한 쪽은 뺀다. 행마다 열 제목과 합쳐진 칸 값을 반복하므로 글자 수가 일부러 다르다.
+    그 쪽의 글자는 tests/test_tables.py가 원본 표 영역과 칸 단위로 대조한다 (사용자 승인 2026-11-09).
+    """
+    restored = {(file, page) for file, page, _ in load_tables()}
     for d in docs.values():
         with pdfplumber.open(PDF_DIR / d["file"]) as pdf:
             for p in d["pages"]:
-                if p["kind"] not in ("body", "history"):
+                if p["kind"] not in ("body", "history") or (d["file"], p["page"]) in restored:
                     continue
                 raw = (pdf.pages[p["page"] - 1].extract_text() or "").splitlines()
                 raw = strip_page_marks([clean_text(x) for x in raw if clean_text(x)])
